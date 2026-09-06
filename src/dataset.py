@@ -1,0 +1,1 @@
+"""Datasets reais, gerador sintético (elipses) e splits"""

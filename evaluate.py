@@ -1,0 +1,1 @@
+"""Avaliação em lote no conjunto de teste/validação"""

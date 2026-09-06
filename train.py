@@ -1,0 +1,1 @@
+"""Pipeline de treino configurável via argumentos CLI"""

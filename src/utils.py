@@ -1,0 +1,1 @@
+"""Helpers de visualização, cálculo do campo receptivo e tiling"""
