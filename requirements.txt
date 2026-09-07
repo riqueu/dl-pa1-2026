@@ -1,0 +1,13 @@
+torch
+torchvision
+numpy
+scipy
+scikit-image
+scikit-learn
+albumentations
+matplotlib
+tqdm
+pandas
+openpyxl
+jupyter
+ipykernel
