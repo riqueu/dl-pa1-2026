@@ -57,7 +57,55 @@ pip install -r requirements.txt
 
 ## 3. Obtenção e Organização dos Dados
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed placerat sem ex, sed eleifend tortor molestie sit amet. Vestibulum consequat maximus dignissim. Sed tincidunt eros sit amet arcu volutpat ornare.
+Para o desenvolvimento das tarefas, utilizamos a **Opção A** (*DSB2018 / BBBC038v1* - microscopia de núcleos celulares).
+
+### 3.1. Arquivos Necessários
+Acesse o portal da base em https://bbbc.broadinstitute.org/BBBC038 e faça o download de:
+1. `stage1_train.zip` (82.9 MB): Conjunto que contém tanto as imagens de microscopia quanto as máscaras individuais de cada núcleo.
+2. `metadata.xlsx` (20 KB): Tabela de metadados utilizada para orientar o split estratificado por modalidade de microscopia.
+
+Nota: Os arquivos `stage1_test.zip` e `stage2_test_final.zip` não são necessários.
+
+### 3.2. Estrutura de Diretórios
+Descompacte os dados locais para manter a seguinte árvore dentro do projeto:
+
+```bash
+data/
+├── raw/
+│   ├── metadata.xlsx
+│   └── stage1_train/
+│       ├── <ImageId_1>/
+│       │   ├── images/
+│       │   │   └── <ImageId_1>.png
+│       │   └── masks/
+│       │       ├── <MaskHash_1>.png
+│       │       ├── <MaskHash_2>.png
+│       │       └── ...
+│       └── <ImageId_N>/
+└── synthetic/
+```
+
+### 3.3. Download e Extração via Terminal
+
+Via Kaggle CLI:
+```bash
+kaggle competitions download -c data-science-bowl-2018 -f stage1_train.zip
+mkdir -p data/raw/stage1_train
+unzip stage1_train.zip -d data/raw/stage1_train
+rm stage1_train.zip
+```
+
+Via download manual [Broad Institute](https://bbbc.broadinstitute.org/BBBC038):
+```bash
+mkdir -p data/raw/stage1_train
+unzip stage1_train.zip -d data/raw/stage1_train
+mv metadata.xlsx data/raw/
+rm stage1_train.zip
+```
+
+### 3.4. Estratificação e Splits
+
+Conforme estabelecido nas especificações do trabalho, a separação entre treino, validação e teste é realizada de forma estratificada considerando a modalidade e condições experimentais descritas no `metadata.xlsx`. O pipeline de dados salva os índices das partições em disco para garantir reproducibilidade exata de todas as curvas e métricas.
 
 ---
 
