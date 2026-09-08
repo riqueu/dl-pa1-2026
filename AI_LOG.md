@@ -1,7 +1,20 @@
-# Registro de uso de ferramentas de IA
+# Registro de Uso de Ferramentas de IA (AI_LOG)
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Etiam dictum convallis ipsum, et eleifend ligula. Phasellus id suscipit eros. Proin sagittis facilisis tellus, in imperdiet dui luctus quis. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Etiam id laoreet risus. Nunc rutrum eros sed eros mollis, vitae fringilla nibh hendrerit. Quisque facilisis facilisis odio efficitur tempus. Donec eu gravida nisl. Integer eu dui nec nunc placerat faucibus et at risus. Morbi imperdiet, nibh ut aliquet dictum, ex arcu cursus velit, at dignissim diam turpis eu lacus. Aenean finibus blandit fringilla. Duis sed commodo ipsum, malesuada dictum magna.
+Documentação do uso de ferramentas de IA no PA1, detalhando decisões técnicas e tarefas desenvolvidas com assistência de IA.
 
-Fusce pretium elit diam, in bibendum nulla feugiat nec. Aenean eget sem ac justo pharetra eleifend sed sit amet neque. Mauris vel vehicula lectus, cursus porttitor magna. Vestibulum convallis elit purus, vitae tempus ipsum ullamcorper id. Mauris tincidunt porta mauris, et dignissim magna pharetra nec. Curabitur convallis condimentum velit ut scelerisque. Aenean dolor justo, aliquam eget tincidunt vel, interdum eu quam. Vivamus ac commodo ipsum. Etiam nec augue porta leo lobortis hendrerit vel eget dui. Sed tempor efficitur orci, a volutpat felis vehicula et. Cras semper, urna sed varius suscipit, massa velit porttitor elit, a bibendum velit ex vel odio. In eu diam id nisi tincidunt vehicula. Aliquam at odio a velit pulvinar bibendum.
+---
 
-Pellentesque varius id eros at accumsan. Aliquam erat volutpat. Vestibulum at nisl massa. Vivamus pharetra non purus in lacinia. Sed vitae lacus suscipit, viverra orci in, vestibulum lectus. Duis et orci lectus. Vestibulum finibus elit id auctor volutpat. 
+## Episódio 1: Padronização de Formatos e Planejamento em Dupla (07/09/2026)
+* **Contexto:** Alinhar os requisitos do `PA1.pdf` (proibição de detectores prontos, matching e decoder autorais) e estruturar o trabalho em dupla sem conflitos de merge.
+* **Uso da IA:** Auxiliou na formulação da divisão de tarefas (Dados/Métricas vs. Modelagem/Treino) e na padronização prévia dos contratos de tensores (`image`, `mask_semantic`, `mask_instance` e assinaturas das métricas).
+* **Decisão:** Desenvolvimento modular isolado por arquivos e branches de feature, garantindo compatibilidade entre os membros da dupla.
+
+---
+
+## Episódio 2: Implementação de Datasets e Métricas (08/09/2026)
+* **Branch:** `feature/dataset-and-metrics` (`src/dataset.py`, `src/metrics.py`).
+* **Uso da IA:**
+  - **Sintético (Parte 0):** Implementação procedural com NumPy para desenhar 5 a 20 elipses rotacionadas sobrepostas com ruído e contraste em $128 \times 128$.
+  - **Métricas (Partes 0 e 1):** Implementação do matching 1-para-1 (Hungarian e Greedy IoU) para mAP@[.50:.95] e erro de contagem, além de IoU e Dice semânticos.
+  - **DSB2018 (Parte 1):** Loader da base real com fusão de máscaras via interpolação Nearest Neighbor e função de estratificação treino/val/teste por modalidade visual de microscopia.
+* **Decisão:** Cumprimento estrito das regras de engenharia (sem bibliotecas de detecção externas) e validação dos módulos via testes unitários automatizados.
