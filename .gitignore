@@ -228,3 +228,5 @@ checkpoints/*.pth
 
 # Mantém e versiona os pesos do modelo final p/entrega
 !checkpoints/best_model.pth
+
+CLAUDE.md
