@@ -226,8 +226,10 @@ data/synthetic/
 # checkpoints intermediários
 checkpoints/*.pth
 
-# Mantém e versiona os pesos do modelo final p/entrega
-!checkpoints/best_model.pth
+# Pesos NÃO vão para o git: ~99 MB por checkpoint infla todo clone para sempre.
+# O PA1 aceita link para o modelo final ("link se for grande"); publicar como
+# GitHub Release na entrega e apontar no README.
+checkpoints/best_model.pth
 
 CLAUDE.md
 testvenv/
