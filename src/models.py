@@ -8,8 +8,6 @@ Contratos de interface respeitados:
 - Saída: Tensor float32 (B, out_channels, H, W) com logits (sem sigmoid/softmax).
 
 Glossário:
-- encoder: metade que encolhe a imagem; enxerga cada vez mais contexto e perde detalhe.
-- decoder: metade que devolve a imagem ao tamanho original, para responder pixel a pixel.
 - feature map: saída de uma camada; cada canal é um padrão que a rede aprendeu a detectar.
 - skip connection: atalho que leva detalhe fino do encoder direto ao decoder.
 - gargalo: ponto de menor resolução, onde há mais contexto e menos detalhe.

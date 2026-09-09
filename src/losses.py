@@ -8,7 +8,6 @@ Assinatura única é o que permite trocar de perda por flag de CLI, sem editar
 o loop de treino.
 
 Glossário:
-- perda: número que mede o quanto a rede errou; o treino tenta diminuí-lo.
 - logits: nota crua da rede, de -inf a +inf; só vira probabilidade depois do sigmoid.
 - BCE: olha cada pixel isolado e castiga conforme a distância entre nota e resposta certa.
 - Dice: mede o quanto a área prevista e a área real se sobrepõem; ignora acerto no fundo.
