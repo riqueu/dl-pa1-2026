@@ -230,3 +230,4 @@ checkpoints/*.pth
 !checkpoints/best_model.pth
 
 CLAUDE.md
+testvenv/
