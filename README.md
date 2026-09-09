@@ -10,7 +10,9 @@ Repositório para o Programming Assignment 1 (PA1) da disciplina de Aprendizado 
 
 ## 1. Visão Geral do Projeto
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed placerat sem ex, sed eleifend tortor molestie sit amet. Vestibulum consequat maximus dignissim. Sed tincidunt eros sit amet arcu volutpat ornare.
+Este projeto implementa e avalia métodos autorais de segmentação de instâncias para microscopia celular baseados no dataset **Data Science Bowl 2018 (DSB2018)**. O fluxo é estruturado em:
+1. **Parte 0 (Teste de Sanidade Sintético):** Validação da arquitetura e das perdas em 500 imagens sintéticas procedurais de elipses sobrepostas.
+2. **Parte 1 (Baseline Semântico):** U-Net com encoder ResNet34 pré-treinado e decoder autoral, extraindo instâncias ingenuamente via componentes conexos e quantificando o colapso de mAP em função da densidade de núcleos.
 
 ```bash
 dl-pa1-2026
@@ -110,14 +112,31 @@ Conforme estabelecido nas especificações do trabalho, a separação entre trei
 ---
 
 ## 4. Execução Rápida
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed placerat sem ex, sed eleifend tortor molestie sit amet. Vestibulum consequat maximus dignissim. Sed tincidunt eros sit amet arcu volutpat ornare.
-
+ 
+### 4.1. Teste de Sanidade Sintético (Parte 0)
+Treinamento rápido na base sintética com 500 imagens procedurais:
+```bash
+python train.py --dataset synthetic --epochs 10 --num_samples 500 --batch_size 16 --out runs/part0_synthetic --checkpoint checkpoints/part0_synthetic.pth
+```
+ 
+### 4.2. Treinamento do Baseline Semântico (Parte 1)
+Treinamento da U-Net (ResNet34) na base real DSB2018 com BCE balanceada + Soft Dice:
+```bash
+python train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out runs/part1_baseline --checkpoint checkpoints/best_model.pth
+```
+ 
+### 4.3. Avaliação no Conjunto de Teste
+Avaliação em lote com matching Hungarian IoU para cálculo de mAP@[.50:.95], erro de contagem e geração dos gráficos de falha vs. densidade:
+```bash
+python evaluate.py --checkpoint checkpoints/best_model.pth --dataset dsb2018 --split test --matching hungarian --output-dir outputs/part1_eval
+```
+ 
 ---
-
+ 
 ## 5. Notebook de Inferência e Checkpoint
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed placerat sem ex, sed eleifend tortor molestie sit amet. Vestibulum consequat maximus dignissim. Sed tincidunt eros sit amet arcu volutpat ornare.
+ 
+- **Inferência direta:** O notebook [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb) implementa a função `predict_instances(image_path, model)`. Ele carrega os pesos em `checkpoints/best_model.pth`, processa qualquer imagem e devolve a máscara colorida de instâncias, a contagem de núcleos e a sobreposição visual sem necessitar de retreinamento.
+- **Pesos:** O checkpoint dos melhores pesos obtidos na validação é gravado em `checkpoints/best_model.pth`.
 
 ## 6. Registro de Uso de Inteligência Artificial
 
