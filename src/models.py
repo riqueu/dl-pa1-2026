@@ -7,6 +7,16 @@ Contratos de interface respeitados:
 - Entrada: Tensor float32 (B, 3, H, W) normalizado em [0.0, 1.0].
 - Saída: Tensor float32 (B, out_channels, H, W) com logits (sem sigmoid/softmax).
 
+Glossário:
+- encoder: metade que encolhe a imagem; enxerga cada vez mais contexto e perde detalhe.
+- decoder: metade que devolve a imagem ao tamanho original, para responder pixel a pixel.
+- feature map: saída de uma camada; cada canal é um padrão que a rede aprendeu a detectar.
+- skip connection: atalho que leva detalhe fino do encoder direto ao decoder.
+- gargalo: ponto de menor resolução, onde há mais contexto e menos detalhe.
+- logits: nota crua da rede, de -inf a +inf; só vira probabilidade depois do sigmoid.
+- stride: de quantos pixels o filtro anda por vez; stride 2 corta a resolução pela metade.
+- pré-treinado: pesos herdados de um treino anterior (ImageNet), usados como ponto de partida.
+- buffer: número que o modelo carrega junto mas nunca aprende nem ajusta.
 """
 
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -111,9 +121,13 @@ class Upsample(nn.Module):
     """Dobra a resolução espacial pelo mecanismo escolhido.
 
     Mecanismos suportados:
-    - 'transpose': convolução transposta 2x2 com stride 2 (aprendido).
+    - 'transpose': convolução transposta 2x2 com stride 2, isto é, ampliação com
+      pesos que a rede aprende, em vez de uma regra fixa de interpolação.
     - 'bilinear': interpolação bilinear (sem parâmetros).
     - 'nearest': interpolação por vizinho mais próximo (sem parâmetros).
+
+    Pool indices: anotar em que posição estava o maior valor de cada janela ao
+    encolher, para devolver o valor exatamente ali ao ampliar de volta.
 
     O mecanismo de pool indices do SegNet não é oferecido aqui porque a ResNet
     reduz resolução por convolução com stride, não por max pooling, e portanto não
