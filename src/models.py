@@ -17,7 +17,7 @@ import torch.nn.functional as F
 import torchvision
 
 
-# Constantes de normalização do pré-treino ImageNet (ver trava 2 no docstring)
+# Constantes de normalização do pré-treino ImageNet
 IMAGENET_MEAN: Tuple[float, float, float] = (0.485, 0.456, 0.406)
 IMAGENET_STD: Tuple[float, float, float] = (0.229, 0.224, 0.225)
 
@@ -115,7 +115,7 @@ class Upsample(nn.Module):
     - 'bilinear': interpolação bilinear (sem parâmetros).
     - 'nearest': interpolação por vizinho mais próximo (sem parâmetros).
 
-    O mecanismo de *pool indices* do SegNet não é oferecido aqui porque a ResNet
+    O mecanismo de pool indices do SegNet não é oferecido aqui porque a ResNet
     reduz resolução por convolução com stride, não por max pooling, e portanto não
     produz os índices necessários. Comparar pool indices no Eixo 1 da Parte 3 exige
     um encoder do tipo VGG/SegNet, a ser adicionado quando aquela ablação começar.
@@ -137,9 +137,12 @@ class Upsample(nn.Module):
 
         if mode == "transpose":
             self.up: nn.Module = nn.ConvTranspose2d(channels, channels, kernel_size=2, stride=2)
+            
         elif mode in ("bilinear", "nearest"):
             self.up = nn.Identity()
+            
         elif mode == "unpool":
+            # Método de Pool não implementado...
             raise NotImplementedError(
                 "up_mode='unpool' exige um encoder que reduza resolução por max pooling "
                 "(VGG/SegNet) para fornecer os pool indices. A ResNet usa stride."
