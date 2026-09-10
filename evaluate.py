@@ -7,7 +7,7 @@ Este script atende ao requisito do README do PA1 ('um comando que avalia'):
   exigido no Item 5 da Parte 1.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Tuple
 import argparse
 import json
 import os
@@ -16,15 +16,14 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from scipy.ndimage import label as ndimage_label
 
 from src.dataset import DSB2018Dataset, SyntheticDataset, load_splits
 from src.metrics import (
     compute_semantic_iou,
     compute_semantic_dice,
     evaluate_instances,
-    evaluate_instance_batch,
 )
+from src.postprocess import naive_connected_components, watershed_instance_segmentation
 from src.utils import (
     plot_failure_vs_density,
     plot_sample_comparison,
@@ -71,16 +70,59 @@ def parse_args() -> argparse.Namespace:
         help="Estratégia de matching para mAP de instâncias",
     )
     parser.add_argument(
+        "--task",
+        choices=["auto", "semantic", "watershed"],
+        default="auto",
+        help="Representação da saída; auto infere pelo número de canais do checkpoint",
+    )
+    parser.add_argument(
         "--threshold",
         type=float,
         default=0.50,
         help="Limiar de probabilidade binária sobre a saída sigmoide da rede",
     )
     parser.add_argument(
+        "--interior-threshold",
+        type=float,
+        default=0.50,
+        help="Limiar dos marcadores de interior no modo watershed",
+    )
+    parser.add_argument(
+        "--foreground-threshold",
+        type=float,
+        default=0.50,
+        help="Limiar de P(interior) + P(fronteira) no modo watershed",
+    )
+    parser.add_argument(
+        "--connectivity",
+        type=int,
+        choices=[1, 2],
+        default=1,
+        help="Conectividade usada pelo pós-processamento",
+    )
+    parser.add_argument(
+        "--min-size",
+        type=int,
+        default=0,
+        help="Área mínima das instâncias previstas; zero desliga o filtro",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=8,
         help="Tamanho do lote na avaliação",
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=100,
+        help="Número de imagens quando dataset=synthetic",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=2,
+        help="Processos usados pelo DataLoader; use zero em ambientes restritos",
     )
     parser.add_argument(
         "--output-dir",
@@ -90,9 +132,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--save-plots",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Se ativado, gera os gráficos de densidade e painéis comparativos",
+        help="Gera os gráficos de densidade e painéis comparativos",
     )
     parser.add_argument(
         "--device",
@@ -103,43 +145,43 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def extract_instances_naive(prob_map: np.ndarray, threshold: float = 0.50) -> np.ndarray:
-    """Extrai instâncias pelo método ingênuo (Item 2 da Parte 1: limiar + componentes conexos)."""
-    binary_map = (prob_map >= threshold).astype(np.uint8)
-    labeled_mask, _ = ndimage_label(binary_map)
-    return labeled_mask.astype(np.int64)
-
-
-def load_model(checkpoint_path: str, device: torch.device) -> torch.nn.Module:
-    """Tenta carregar o modelo a partir de src.models e os pesos do checkpoint."""
-    try:
-        from src.models import build_model
-        model = build_model()
-    except (ImportError, AttributeError):
-        try:
-            from src.models import UNet
-            model = UNet()
-        except (ImportError, AttributeError) as exc:
-            raise RuntimeError(
-                "O módulo src.models ainda não possui a classe de modelo pronta. "
-                "Aguardando a implementação do Pilar de Modelos."
-            ) from exc
-
+def load_model(
+    checkpoint_path: str,
+    device: torch.device,
+) -> Tuple[torch.nn.Module, str]:
+    """Reconstrói o modelo do checkpoint e infere sua representação de saída."""
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(
             f"Checkpoint não encontrado em '{checkpoint_path}'. "
             "Treine o modelo antes de executar a avaliação."
         )
 
-    state_dict = torch.load(checkpoint_path, map_location=device)
-    # Suporte para checkpoints que salvam dict com 'model_state_dict' ou o próprio state_dict
-    if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
-        state_dict = state_dict["model_state_dict"]
+    from src.models import build_model
 
-    model.load_state_dict(state_dict)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        state_dict = checkpoint["model_state_dict"]
+        model_args = dict(checkpoint.get("model_args", {}))
+    else:
+        # Compatibilidade com checkpoints antigos contendo somente o state_dict.
+        state_dict = checkpoint
+        model_args = {}
+
+    out_channels = int(model_args.get("out_channels", 1))
+    if out_channels not in (1, 3):
+        raise RuntimeError(
+            f"Checkpoint com {out_channels} canais não corresponde à baseline nem ao watershed."
+        )
+
+    # Os pesos serão substituídos imediatamente; evita download ImageNet na avaliação.
+    model_args["pretrained"] = False
+    model = build_model(**model_args)
+
+    model.load_state_dict(state_dict, strict=True)
     model.to(device)
     model.eval()
-    return model
+    task = "watershed" if out_channels == 3 else "semantic"
+    return model, task
 
 
 def main() -> None:
@@ -169,18 +211,25 @@ def main() -> None:
 
         dataset = DSB2018Dataset(image_ids=image_ids, target_size=(256, 256))
     else:
-        dataset = SyntheticDataset(num_samples=100, seed=123)
+        dataset = SyntheticDataset(num_samples=args.num_samples, seed=123)
 
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
+    loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
     print(f"Total de imagens a avaliar: {len(dataset)}")
 
     # 2. Carregar Modelo
-    try:
-        model = load_model(args.checkpoint, device)
-    except (RuntimeError, FileNotFoundError) as e:
-        print(f"\n[INFO] {e}")
-        print("Pipeline de avaliação validado estruturalmente com sucesso. Aguardando pesos do treino.")
-        return
+    model, checkpoint_task = load_model(args.checkpoint, device)
+
+    if args.task != "auto" and args.task != checkpoint_task:
+        raise ValueError(
+            f"--task={args.task} não combina com o checkpoint de tarefa {checkpoint_task}."
+        )
+    task = checkpoint_task if args.task == "auto" else args.task
+    print(f"Representação inferida do checkpoint: {task}")
 
     # 3. Loop de Inferência e Coleta de Métricas
     semantic_ious: List[float] = []
@@ -201,23 +250,41 @@ def main() -> None:
             batch_ids = batch.get("image_id", [f"img_{i}" for i in range(len(images))])
 
             logits = model(images)
-            probs = torch.sigmoid(logits).cpu().numpy()
+            if task == "watershed":
+                probs = torch.softmax(logits, dim=1).cpu().numpy()
+            else:
+                probs = torch.sigmoid(logits).cpu().numpy()
 
             for b in range(len(images)):
-                prob_map = probs[b, 0]
                 gt_sem = gt_semantics[b, 0].numpy()
                 gt_inst = gt_instances[b]
                 i_id = batch_ids[b]
 
-                # Métricas Semânticas
-                pred_binary = (prob_map >= args.threshold).astype(np.float32)
+                if task == "watershed":
+                    pred_inst = watershed_instance_segmentation(
+                        probs[b],
+                        interior_threshold=args.interior_threshold,
+                        foreground_threshold=args.foreground_threshold,
+                        min_area=args.min_size,
+                        connectivity=args.connectivity,
+                    )
+                    pred_binary = (pred_inst > 0).astype(np.float32)
+                else:
+                    prob_map = probs[b, 0]
+                    pred_inst = naive_connected_components(
+                        prob_map,
+                        threshold=args.threshold,
+                        from_logits=False,
+                        connectivity=args.connectivity,
+                        min_size=args.min_size,
+                    )
+                    pred_binary = (prob_map >= args.threshold).astype(np.float32)
+
+                # Métricas semânticas sobre a união das instâncias previstas.
                 s_iou = compute_semantic_iou(pred_binary, gt_sem)
                 s_dice = compute_semantic_dice(pred_binary, gt_sem)
                 semantic_ious.append(s_iou)
                 semantic_dices.append(s_dice)
-
-                # Pós-processamento Ingênuo (Componentes Conexos)
-                pred_inst = extract_instances_naive(prob_map, threshold=args.threshold)
 
                 # Métrica de Instâncias (Hungarian ou Greedy)
                 inst_res = evaluate_instances(pred_inst, gt_inst, method=args.matching)
@@ -268,6 +335,7 @@ def main() -> None:
     metrics_summary = {
         "dataset": args.dataset,
         "split": args.split,
+        "task": task,
         "matching": args.matching,
         "mean_semantic_iou": mean_sem_iou,
         "mean_semantic_dice": mean_sem_dice,
@@ -275,7 +343,10 @@ def main() -> None:
         "mean_count_error": mean_count_err,
         "AP_per_threshold": {f"{t:.2f}": float(np.mean([r["AP_per_iou"][t] for r in instance_results])) for t in thresholds},
     }
-    json_path = os.path.join(args.output_dir, f"metrics_{args.dataset}_{args.split}_{args.matching}.json")
+    json_path = os.path.join(
+        args.output_dir,
+        f"metrics_{args.dataset}_{args.split}_{task}_{args.matching}.json",
+    )
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(metrics_summary, f, indent=2)
     print(f"\nMétricas salvas em: {json_path}")
@@ -283,7 +354,10 @@ def main() -> None:
     # 6. Gráfico de Fracasso vs Densidade (Item 5 da Parte 1)
     if args.save_plots:
         print("\nGerando gráficos de diagnóstico e painéis de falhas...")
-        failure_plot_path = os.path.join(args.output_dir, f"failure_vs_density_{args.matching}.png")
+        failure_plot_path = os.path.join(
+            args.output_dir,
+            f"failure_vs_density_{task}_{args.matching}.png",
+        )
         plot_failure_vs_density(
             nuclei_counts=gt_counts,
             map_scores=[r["mAP"] for r in instance_results],
@@ -303,19 +377,19 @@ def main() -> None:
             worst["image"], worst["gt"], worst["pred"],
             metrics={"mAP": worst["mAP"], "count_error": worst["count_error"], "iou": worst["iou"]},
             title_prefix=f"Pior Caso ({worst['id']})",
-            save_path=os.path.join(args.output_dir, "sample_worst.png"),
+            save_path=os.path.join(args.output_dir, f"sample_{task}_worst.png"),
         )
         plot_sample_comparison(
             median["image"], median["gt"], median["pred"],
             metrics={"mAP": median["mAP"], "count_error": median["count_error"], "iou": median["iou"]},
             title_prefix=f"Caso Mediano ({median['id']})",
-            save_path=os.path.join(args.output_dir, "sample_median.png"),
+            save_path=os.path.join(args.output_dir, f"sample_{task}_median.png"),
         )
         plot_sample_comparison(
             best["image"], best["gt"], best["pred"],
             metrics={"mAP": best["mAP"], "count_error": best["count_error"], "iou": best["iou"]},
             title_prefix=f"Melhor Caso ({best['id']})",
-            save_path=os.path.join(args.output_dir, "sample_best.png"),
+            save_path=os.path.join(args.output_dir, f"sample_{task}_best.png"),
         )
         print(f"Painéis visuais (pior, mediano, melhor) salvos em: {args.output_dir}")
 
