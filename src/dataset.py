@@ -21,6 +21,7 @@ import os
 from PIL import Image
 import numpy as np
 import pandas as pd
+from scipy.ndimage import binary_erosion, generate_binary_structure
 import torch
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
@@ -131,6 +132,63 @@ def generate_synthetic_sample(
     return image_3ch, semantic_mask, instance_mask
 
 
+def generate_three_class_mask(
+    instance_mask: Union[np.ndarray, torch.Tensor],
+    connectivity: int = 1,
+) -> np.ndarray:
+    """Gera uma máscara com 3 classes para a Trilha A (Fronteiras e Watershed).
+
+    Classes geradas:
+        - 0 (Fundo): Pixels externos a qualquer núcleo.
+        - 1 (Interior): Núcleos individuais erodidos morfologicamente por 1 pixel.
+                        Garante que núcleos vizinhos tenham sementes desconectadas.
+        - 2 (Fronteira): Regiões de contorno e contato entre núcleos adjacentes.
+
+    Args:
+        instance_mask: Array numpy ou Tensor int64 (H, W) com 0=fundo e 1..K=IDs.
+        connectivity: Conectividade do elemento estruturante (1 = cruz 4-conexo,
+                      2 = quadrado 3x3 8-conexo). Padrão: 1.
+
+    Returns:
+        Array numpy int64 (H, W) contendo valores em {0, 1, 2}.
+    """
+    if isinstance(instance_mask, torch.Tensor):
+        inst = instance_mask.detach().cpu().numpy()
+    else:
+        inst = np.asarray(instance_mask)
+
+    three_class = np.zeros_like(inst, dtype=np.int64)
+    unique_ids = np.unique(inst)
+    unique_ids = unique_ids[unique_ids > 0]
+
+    if len(unique_ids) == 0:
+        return three_class
+
+    struct = generate_binary_structure(2, connectivity)
+    h, w = inst.shape
+
+    for uid in unique_ids:
+        ys, xs = np.where(inst == uid)
+        y0, y1 = max(0, ys.min() - 1), min(h, ys.max() + 2)
+        x0, x1 = max(0, xs.min() - 1), min(w, xs.max() + 2)
+
+        sub_m = (inst[y0:y1, x0:x1] == uid)
+        sub_eroded = binary_erosion(sub_m, structure=struct)
+
+        # Se o núcleo for muito pequeno e a erosão o apagar, preserva o pixel central
+        if not np.any(sub_eroded):
+            sub_coords = np.argwhere(sub_m)
+            center = sub_coords[len(sub_coords) // 2]
+            sub_eroded[center[0], center[1]] = True
+
+        three_class[y0:y1, x0:x1][sub_eroded] = 1
+
+    # Classe 2 (Fronteira): pixels pertencentes a núcleos que não são interior
+    three_class[(inst > 0) & (three_class != 1)] = 2
+
+    return three_class
+
+
 class SyntheticDataset(Dataset):
     """PyTorch Dataset para geração procedural de amostras sintéticas na Parte 0.
 
@@ -146,6 +204,7 @@ class SyntheticDataset(Dataset):
         min_ellipses: int = 5,
         max_ellipses: int = 20,
         seed: Optional[int] = None,
+        three_class: bool = False,
     ) -> None:
         """Inicializa o SyntheticDataset.
 
@@ -156,6 +215,7 @@ class SyntheticDataset(Dataset):
             min_ellipses: Número mínimo de elipses (5).
             max_ellipses: Número máximo de elipses (20).
             seed: Semente opcional para dados reproduzíveis (ex: validação fixa).
+            three_class: Se True, adiciona 'mask_three_class' com fundo/interior/fronteira.
         """
         super().__init__()
         self.num_samples = num_samples
@@ -164,6 +224,7 @@ class SyntheticDataset(Dataset):
         self.min_ellipses = min_ellipses
         self.max_ellipses = max_ellipses
         self.seed = seed
+        self.three_class = three_class
 
     def __len__(self) -> int:
         return self.num_samples
@@ -176,6 +237,7 @@ class SyntheticDataset(Dataset):
                 - 'image': Tensor float32 (3, H, W) em [0.0, 1.0].
                 - 'mask_semantic': Tensor float32 (1, H, W) binário {0.0, 1.0}.
                 - 'mask_instance': Tensor int64 (H, W) com IDs de instâncias.
+                - 'mask_three_class' (opcional): Tensor int64 (H, W) com classes {0, 1, 2}.
         """
         # Se seed estiver definido, gera de forma determinística por índice
         rng = np.random.RandomState(self.seed + idx) if self.seed is not None else None
@@ -188,11 +250,17 @@ class SyntheticDataset(Dataset):
             rng=rng,
         )
 
-        return {
+        sample: Dict[str, torch.Tensor] = {
             "image": torch.from_numpy(img).float(),
             "mask_semantic": torch.from_numpy(sem).float(),
             "mask_instance": torch.from_numpy(inst).long(),
         }
+
+        if self.three_class:
+            mask_3c = generate_three_class_mask(inst)
+            sample["mask_three_class"] = torch.from_numpy(mask_3c).long()
+
+        return sample
 
 
 # Dataset Real (Parte 1: DSB2018 / BBBC038v1)
@@ -212,6 +280,7 @@ class DSB2018Dataset(Dataset):
         image_ids: Optional[Sequence[str]] = None,
         target_size: Optional[Tuple[int, int]] = (256, 256),
         transform: Optional[Callable] = None,
+        three_class: bool = False,
     ) -> None:
         """Inicializa o DSB2018Dataset.
 
@@ -221,11 +290,13 @@ class DSB2018Dataset(Dataset):
                        Se None, carrega todos os diretórios encontrados em root_dir.
             target_size: Tupla opcional (H, W) para redimensionar (padrão 256x256).
             transform: Função ou composição de data augmentation opcional.
+            three_class: Se True, adiciona 'mask_three_class' com {0: fundo, 1: interior, 2: fronteira}.
         """
         super().__init__()
         self.root_dir = root_dir
         self.target_size = target_size
         self.transform = transform
+        self.three_class = three_class
 
         if image_ids is not None:
             self.image_ids = list(image_ids)
@@ -292,12 +363,62 @@ class DSB2018Dataset(Dataset):
             semantic_mask = transformed.get("mask", semantic_mask)
             instance_mask = transformed.get("instance", instance_mask)
 
-        return {
+        sample_dict: Dict[str, Union[torch.Tensor, str]] = {
             "image": torch.from_numpy(image_chw).float(),
             "mask_semantic": torch.from_numpy(semantic_mask).float(),
             "mask_instance": torch.from_numpy(instance_mask).long(),
             "image_id": image_id,
         }
+
+        if self.three_class:
+            mask_3c = generate_three_class_mask(instance_mask)
+            sample_dict["mask_three_class"] = torch.from_numpy(mask_3c).long()
+
+        return sample_dict
+
+
+def compute_three_class_weights(
+    dataset: Dataset,
+    num_samples: int = 100,
+    smooth_power: float = 0.5,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Calcula frequências de classes e pesos normalizados para a Trilha A.
+
+    Args:
+        dataset: Dataset que retorna 'mask_instance' ou 'mask_three_class'.
+        num_samples: Quantidade máxima de amostras a inspecionar para estimativa.
+        smooth_power: Expoente para suavização (1.0 = inverso puro, 0.5 = raiz quadrada).
+
+    Returns:
+        Tupla (class_frequencies, normalized_weights):
+            - class_frequencies: Array float64 (3,) com a proporção de cada classe.
+            - normalized_weights: Array float32 (3,) com pesos normalizados (peso da classe 0 = 1.0).
+    """
+    total_counts = np.zeros(3, dtype=np.int64)
+    n = min(len(dataset), num_samples)
+
+    for i in range(n):
+        sample = dataset[i]
+        if "mask_three_class" in sample:
+            m = sample["mask_three_class"]
+            if isinstance(m, torch.Tensor):
+                m = m.cpu().numpy()
+        else:
+            inst = sample["mask_instance"]
+            m = generate_three_class_mask(inst)
+
+        for c in range(3):
+            total_counts[c] += (m == c).sum()
+
+    total_pixels = total_counts.sum()
+    if total_pixels == 0:
+        return np.ones(3) / 3.0, np.ones(3, dtype=np.float32)
+
+    freqs = total_counts / float(total_pixels)
+    inv_freq = (1.0 / (freqs + 1e-6)) ** smooth_power
+    weights = inv_freq / inv_freq[0]
+
+    return freqs, weights.astype(np.float32)
 
 
 # Estratificação e Criação de Splits (Parte 1)
