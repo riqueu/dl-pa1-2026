@@ -1,11 +1,11 @@
 """CE balanceada, Focal Loss, L1/L2.
 
-Perdas da baseline binária (Partes 0 e 1) e da ablação do Eixo 2 (Parte 3).
+Perdas da baseline binária (Partes 0 e 1), da cabeça de fronteiras (Parte 2)
+e da ablação do Eixo 2 (Parte 3).
 
-Todas as perdas compartilham a mesma assinatura `(logits, target)`, com
-logits float32 (B, 1, H, W) crus e target float32 (B, 1, H, W) em {0.0, 1.0}.
-Assinatura única é o que permite trocar de perda por flag de CLI, sem editar
-o loop de treino.
+Todas as perdas compartilham a assinatura ``(logits, target)``. As binárias
+recebem logits ``(B, 1, H, W)`` e alvo float; as multiclasse recebem logits
+``(B, C, H, W)`` e alvo int64 ``(B, H, W)``.
 
 Glossário:
 - logits: nota crua da rede, de -inf a +inf; só vira probabilidade depois do sigmoid.
@@ -18,7 +18,7 @@ Glossário:
 - gamma: na focal, o quanto ignorar os exemplos que a rede já acerta com folga.
 """
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Sequence, Union
 
 import torch
 import torch.nn as nn
@@ -173,6 +173,91 @@ class FocalLoss(nn.Module):
         return loss.mean()
 
 
+class WeightedCrossEntropyLoss(nn.Module):
+    """Entropia cruzada multiclasse com peso independente por classe.
+
+    Na Trilha A, a fronteira ocupa uma fração pequena da imagem. Os pesos
+    compensam essa frequência sem modificar o alvo categórico.
+    """
+
+    def __init__(self, class_weights: Optional[Sequence[float]] = None) -> None:
+        """Inicializa a perda.
+
+        Args:
+            class_weights: Pesos na ordem fundo, interior e fronteira. ``None``
+                reproduz a entropia cruzada multiclasse comum.
+        """
+        super().__init__()
+        weights = None
+        if class_weights is not None:
+            weights = torch.as_tensor(class_weights, dtype=torch.float32)
+            if weights.ndim != 1 or weights.numel() == 0:
+                raise ValueError("class_weights deve ser uma sequência unidimensional não vazia.")
+            if not torch.isfinite(weights).all() or (weights <= 0).any():
+                raise ValueError("Todos os pesos de classe devem ser positivos e finitos.")
+        self.register_buffer("class_weights", weights)
+
+    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Calcula a CE média sobre todos os pixels."""
+        return F.cross_entropy(logits, target.long(), weight=self.class_weights)
+
+
+class MulticlassFocalLoss(nn.Module):
+    """Focal loss multiclasse para a cabeça fundo/interior/fronteira.
+
+    Para cada pixel, multiplica a CE da classe verdadeira por
+    ``(1 - p_t) ** gamma``. ``gamma=0`` reproduz exatamente a CE, inclusive
+    quando os pesos ``alpha`` estão presentes.
+    """
+
+    def __init__(
+        self,
+        gamma: float = 2.0,
+        alpha: Optional[Sequence[float]] = None,
+    ) -> None:
+        """Inicializa a perda.
+
+        Args:
+            gamma: Expoente não negativo do fator focal.
+            alpha: Pesos por classe, na ordem dos canais, ou ``None``.
+        """
+        super().__init__()
+        if gamma < 0:
+            raise ValueError("gamma deve ser maior ou igual a zero.")
+        self.gamma = gamma
+
+        alpha_tensor = None
+        if alpha is not None:
+            alpha_tensor = torch.as_tensor(alpha, dtype=torch.float32)
+            if alpha_tensor.ndim != 1 or alpha_tensor.numel() == 0:
+                raise ValueError("alpha deve ser uma sequência unidimensional não vazia.")
+            if not torch.isfinite(alpha_tensor).all() or (alpha_tensor <= 0).any():
+                raise ValueError("Todos os valores de alpha devem ser positivos e finitos.")
+        self.register_buffer("alpha", alpha_tensor)
+
+    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Calcula a focal multiclasse média de forma numericamente estável."""
+        if logits.ndim < 3:
+            raise ValueError(f"logits multiclasse deve ter ao menos 3 eixos; recebeu {logits.shape}.")
+        if self.alpha is not None and self.alpha.numel() != logits.shape[1]:
+            raise ValueError(
+                f"alpha tem {self.alpha.numel()} pesos, mas logits tem {logits.shape[1]} classes."
+            )
+
+        log_probs = F.log_softmax(logits, dim=1)
+        target = target.long()
+        log_pt = log_probs.gather(1, target.unsqueeze(1)).squeeze(1)
+        pt = log_pt.exp()
+        loss = -((1.0 - pt).pow(self.gamma)) * log_pt
+
+        if self.alpha is not None:
+            pixel_weights = self.alpha[target]
+            loss = loss * pixel_weights
+            return loss.sum() / pixel_weights.sum()
+
+        return loss.mean()
+
+
 def compute_pos_weight(masks: torch.Tensor, eps: float = 1e-7) -> float:
     """Calcula a razão fundo/frente para uso como `pos_weight` na BCE.
 
@@ -191,11 +276,50 @@ def compute_pos_weight(masks: torch.Tensor, eps: float = 1e-7) -> float:
     return float((total - positives) / (positives + eps))
 
 
+def compute_class_weights(
+    targets: torch.Tensor,
+    num_classes: int = 3,
+) -> torch.Tensor:
+    """Calcula pesos por frequência inversa para alvos categóricos.
+
+    A fórmula ``N / (C * N_c)`` dá peso maior às classes raras e mantém a
+    contribuição média ponderada em torno de um. Deve ser aplicada apenas aos
+    alvos do split de treino.
+
+    Args:
+        targets: Tensor inteiro contendo os IDs de classe.
+        num_classes: Número total de classes esperado.
+
+    Returns:
+        Tensor float32 ``(num_classes,)`` com os pesos.
+
+    Raises:
+        ValueError: Se houver IDs fora do intervalo ou alguma classe estiver
+            ausente da amostra usada para estimar os pesos.
+    """
+    if num_classes <= 0:
+        raise ValueError("num_classes deve ser positivo.")
+
+    flat = targets.detach().long().reshape(-1).cpu()
+    if flat.numel() == 0:
+        raise ValueError("targets não pode ser vazio.")
+    if flat.min().item() < 0 or flat.max().item() >= num_classes:
+        raise ValueError(f"targets deve conter apenas IDs entre 0 e {num_classes - 1}.")
+
+    counts = torch.bincount(flat, minlength=num_classes).to(torch.float64)
+    if (counts == 0).any():
+        missing = torch.nonzero(counts == 0).flatten().tolist()
+        raise ValueError(f"Não é possível pesar classes ausentes: {missing}.")
+
+    weights = counts.sum() / (num_classes * counts)
+    return weights.to(torch.float32)
+
+
 def build_loss(name: str = "bce_dice", **kwargs: Any) -> nn.Module:
     """Constrói a perda pelo nome, para seleção via linha de comando.
 
     Args:
-        name: 'bce_dice', 'bce', 'dice' ou 'focal'.
+        name: Nome de uma perda binária ou multiclasse registrada.
         **kwargs: Repassados ao construtor da perda escolhida.
 
     Returns:
@@ -209,6 +333,8 @@ def build_loss(name: str = "bce_dice", **kwargs: Any) -> nn.Module:
         "bce": lambda **kw: BCEDiceLoss(bce_weight=1.0, dice_weight=0.0, **kw),
         "dice": lambda **kw: BCEDiceLoss(bce_weight=0.0, dice_weight=1.0, **kw),
         "focal": FocalLoss,
+        "weighted_ce_3c": WeightedCrossEntropyLoss,
+        "multiclass_focal": MulticlassFocalLoss,
     }
 
     if name not in registry:
@@ -253,4 +379,16 @@ if __name__ == "__main__":
         prev = value
 
     print(f"pos_weight do alvo de teste: {compute_pos_weight(target):.3f}")
+
+    # Perdas da Parte 2: shapes, backward e equivalência focal(gamma=0) == CE.
+    target_3c = torch.randint(0, 3, (2, 32, 32))
+    logits_3c = torch.randn(2, 3, 32, 32, requires_grad=True)
+    class_weights = compute_class_weights(target_3c)
+    ce_3c = WeightedCrossEntropyLoss(class_weights)(logits_3c, target_3c)
+    focal_3c = MulticlassFocalLoss(gamma=0.0, alpha=class_weights)(logits_3c, target_3c)
+    assert torch.allclose(focal_3c, ce_3c, atol=1e-6)
+    ce_3c.backward()
+    assert logits_3c.grad is not None and torch.isfinite(logits_3c.grad).all()
+    print(f"pesos 3 classes: {[round(v, 3) for v in class_weights.tolist()]}")
+    print(f"CE 3 classes: {ce_3c.item():.6f} | focal(gamma=0): {focal_3c.item():.6f}")
     print("todos os testes ok")
