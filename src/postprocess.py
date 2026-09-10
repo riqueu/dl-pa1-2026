@@ -20,11 +20,12 @@ Regras de decodificação escolhidas (a Parte 1 exige que sejam explícitas):
   ingênua. O filtro existe para ser calibrado na validação, nunca no teste.
 """
 
-from typing import List, Optional, Sequence, Union
+from typing import List, Union
 
 import numpy as np
 import torch
 from scipy import ndimage
+from skimage.segmentation import watershed
 
 
 ArrayLike = Union[np.ndarray, torch.Tensor]
@@ -58,6 +59,23 @@ def _to_numpy_2d(x: ArrayLike) -> np.ndarray:
         )
 
     return x
+
+
+def _to_numpy_three_channels(x: ArrayLike) -> np.ndarray:
+    """Converte uma predição individual para o formato ``(3, H, W)``."""
+    if isinstance(x, torch.Tensor):
+        x = x.detach().cpu().numpy()
+
+    x = np.asarray(x)
+    if x.ndim == 4 and x.shape[0] == 1:
+        x = x[0]
+    if x.ndim != 3 or x.shape[0] != 3:
+        raise ValueError(
+            f"Esperado shape (3, H, W) ou (1, 3, H, W); recebido {x.shape}."
+        )
+    if not np.isfinite(x).all():
+        raise ValueError("A predição contém valores não finitos.")
+    return x.astype(np.float32, copy=False)
 
 
 def _relabel_consecutive(labels: np.ndarray) -> np.ndarray:
@@ -168,6 +186,97 @@ def naive_connected_components_batch(
             min_size=min_size,
         )
         for img in x
+    ]
+
+
+def watershed_instance_segmentation(
+    prob: ArrayLike,
+    interior_threshold: float = 0.50,
+    foreground_threshold: float = 0.50,
+    min_area: int = 10,
+    connectivity: int = 1,
+) -> np.ndarray:
+    """Decodifica fundo/interior/fronteira em instâncias via watershed.
+
+    Os componentes conexos do interior são os marcadores. A soma das
+    probabilidades de interior e fronteira delimita o foreground, enquanto a
+    probabilidade de fronteira forma a superfície topográfica: regiões de
+    fronteira são cristas que separam a inundação iniciada em cada marcador.
+
+    Args:
+        prob: Probabilidades ``(3, H, W)`` na ordem fundo, interior e fronteira.
+        interior_threshold: Limiar para formar os marcadores de interior.
+        foreground_threshold: Limiar de ``P(interior) + P(fronteira)``.
+        min_area: Remove instâncias previstas com menos pixels. Zero desliga.
+        connectivity: 1 para vizinhança de 4; 2 para vizinhança de 8.
+
+    Returns:
+        Array NumPy int64 ``(H, W)``, com 0 = fundo e IDs consecutivos.
+    """
+    if not 0.0 <= interior_threshold <= 1.0:
+        raise ValueError("interior_threshold deve estar entre 0 e 1.")
+    if not 0.0 <= foreground_threshold <= 1.0:
+        raise ValueError("foreground_threshold deve estar entre 0 e 1.")
+    if min_area < 0:
+        raise ValueError("min_area deve ser maior ou igual a zero.")
+    if connectivity not in (1, 2):
+        raise ValueError("connectivity deve ser 1 (4-vizinhos) ou 2 (8-vizinhos).")
+
+    probabilities = _to_numpy_three_channels(prob)
+    p_interior = probabilities[1]
+    p_boundary = probabilities[2]
+
+    foreground = (p_interior + p_boundary) >= foreground_threshold
+    seeds = (p_interior >= interior_threshold) & foreground
+    structure = ndimage.generate_binary_structure(2, connectivity)
+    markers, n_markers = ndimage.label(seeds, structure=structure)
+
+    if n_markers == 0 or not foreground.any():
+        return np.zeros(foreground.shape, dtype=np.int64)
+
+    labels = watershed(
+        image=p_boundary,
+        markers=markers,
+        mask=foreground,
+        connectivity=structure,
+        watershed_line=False,
+    ).astype(np.int64)
+
+    if min_area > 0:
+        counts = np.bincount(labels.ravel())
+        too_small = np.flatnonzero(counts < min_area)
+        too_small = too_small[too_small != 0]
+        if too_small.size > 0:
+            labels[np.isin(labels, too_small)] = 0
+
+    return _relabel_consecutive(labels)
+
+
+def watershed_instance_segmentation_batch(
+    prob: ArrayLike,
+    interior_threshold: float = 0.50,
+    foreground_threshold: float = 0.50,
+    min_area: int = 10,
+    connectivity: int = 1,
+) -> List[np.ndarray]:
+    """Aplica a decodificação watershed a um lote ``(B, 3, H, W)``."""
+    if isinstance(prob, torch.Tensor):
+        prob = prob.detach().cpu().numpy()
+    batch = np.asarray(prob)
+    if batch.ndim == 3:
+        batch = batch[np.newaxis]
+    if batch.ndim != 4 or batch.shape[1] != 3:
+        raise ValueError(f"Esperado shape (B, 3, H, W); recebido {batch.shape}.")
+
+    return [
+        watershed_instance_segmentation(
+            item,
+            interior_threshold=interior_threshold,
+            foreground_threshold=foreground_threshold,
+            min_area=min_area,
+            connectivity=connectivity,
+        )
+        for item in batch
     ]
 
 
