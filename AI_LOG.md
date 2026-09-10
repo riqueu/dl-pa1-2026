@@ -13,8 +13,8 @@ Documentação sintética do uso de ferramentas de IA no PA1, servindo como indi
 
 ## Episódio 2: Desenvolvimento dos Módulos Principais
 * **Contexto:** Implementação dos datasets (sintético procedural e DSB2018 estratificado), U-Net com encoder pré-treinado, funções de perda customizadas e métricas autorais de matching 1-para-1.
-* **Uso da IA:** Atuou como suporte de pair programming na escrita, vetorização e testes dos módulos em `src/` (`dataset.py`, `metrics.py`, `models.py`, `losses.py`, `postprocess.py`), assegurando o cumprimento estrito das restrições do edital.
-* **Decisão Técnica:** Implementação 100% autoral das perdas, do decoder U-Net e dos algoritmos de matching (Hungarian e Greedy IoU), sem uso de bibliotecas prontas de detecção.
+* **Uso da IA:** Atuou como suporte de pair programming na escrita, vetorização e testes dos módulos em `src/` (`dataset.py`, `metrics.py`, `models.py`, `losses.py`, `postprocess.py`), incluindo a formulação da Trilha A (segmentação 3 classes e decodificação por watershed), assegurando o cumprimento estrito das restrições do edital.
+* **Decisão Técnica:** Implementação 100% autoral das perdas (ponderadas e focais), do decoder U-Net, da decodificação watershed e dos algoritmos de matching (Hungarian e Greedy IoU), sem uso de bibliotecas prontas de detecção.
 
 ---
 

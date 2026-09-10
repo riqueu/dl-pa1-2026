@@ -180,14 +180,21 @@ class WeightedCrossEntropyLoss(nn.Module):
     compensam essa frequência sem modificar o alvo categórico.
     """
 
-    def __init__(self, class_weights: Optional[Sequence[float]] = None) -> None:
+    def __init__(
+        self,
+        class_weights: Optional[Sequence[float]] = None,
+        weight: Optional[Sequence[float]] = None,
+    ) -> None:
         """Inicializa a perda.
 
         Args:
             class_weights: Pesos na ordem fundo, interior e fronteira. ``None``
                 reproduz a entropia cruzada multiclasse comum.
+            weight: Alias para ``class_weights`` para compatibilidade com PyTorch.
         """
         super().__init__()
+        if class_weights is None:
+            class_weights = weight
         weights = None
         if class_weights is not None:
             weights = torch.as_tensor(class_weights, dtype=torch.float32)
@@ -199,7 +206,10 @@ class WeightedCrossEntropyLoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Calcula a CE média sobre todos os pixels."""
-        return F.cross_entropy(logits, target.long(), weight=self.class_weights)
+        weight = self.class_weights
+        if weight is not None and weight.device != logits.device:
+            weight = weight.to(logits.device)
+        return F.cross_entropy(logits, target.long(), weight=weight)
 
 
 class MulticlassFocalLoss(nn.Module):
@@ -214,17 +224,24 @@ class MulticlassFocalLoss(nn.Module):
         self,
         gamma: float = 2.0,
         alpha: Optional[Sequence[float]] = None,
+        class_weights: Optional[Sequence[float]] = None,
+        weight: Optional[Sequence[float]] = None,
     ) -> None:
         """Inicializa a perda.
 
         Args:
             gamma: Expoente não negativo do fator focal.
             alpha: Pesos por classe, na ordem dos canais, ou ``None``.
+            class_weights: Alias para ``alpha``.
+            weight: Alias para ``alpha``.
         """
         super().__init__()
         if gamma < 0:
             raise ValueError("gamma deve ser maior ou igual a zero.")
         self.gamma = gamma
+
+        if alpha is None:
+            alpha = class_weights if class_weights is not None else weight
 
         alpha_tensor = None
         if alpha is not None:
@@ -239,9 +256,12 @@ class MulticlassFocalLoss(nn.Module):
         """Calcula a focal multiclasse média de forma numericamente estável."""
         if logits.ndim < 3:
             raise ValueError(f"logits multiclasse deve ter ao menos 3 eixos; recebeu {logits.shape}.")
-        if self.alpha is not None and self.alpha.numel() != logits.shape[1]:
+        alpha = self.alpha
+        if alpha is not None and alpha.device != logits.device:
+            alpha = alpha.to(logits.device)
+        if alpha is not None and alpha.numel() != logits.shape[1]:
             raise ValueError(
-                f"alpha tem {self.alpha.numel()} pesos, mas logits tem {logits.shape[1]} classes."
+                f"alpha tem {alpha.numel()} pesos, mas logits tem {logits.shape[1]} classes."
             )
 
         log_probs = F.log_softmax(logits, dim=1)
@@ -250,8 +270,8 @@ class MulticlassFocalLoss(nn.Module):
         pt = log_pt.exp()
         loss = -((1.0 - pt).pow(self.gamma)) * log_pt
 
-        if self.alpha is not None:
-            pixel_weights = self.alpha[target]
+        if alpha is not None:
+            pixel_weights = alpha[target]
             loss = loss * pixel_weights
             return loss.sum() / pixel_weights.sum()
 

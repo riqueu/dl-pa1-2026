@@ -25,6 +25,7 @@ from src.metrics import (
     evaluate_instances,
     evaluate_instance_batch,
 )
+from src.postprocess import watershed_instance_segmentation
 from src.utils import (
     plot_failure_vs_density,
     plot_sample_comparison,
@@ -77,6 +78,24 @@ def parse_args() -> argparse.Namespace:
         help="Limiar de probabilidade binária sobre a saída sigmoide da rede",
     )
     parser.add_argument(
+        "--interior-threshold",
+        type=float,
+        default=0.50,
+        help="Limiar de interior para sementes no watershed (quando out_channels=3)",
+    )
+    parser.add_argument(
+        "--foreground-threshold",
+        type=float,
+        default=0.50,
+        help="Limiar de foreground no watershed (quando out_channels=3)",
+    )
+    parser.add_argument(
+        "--min-area",
+        type=int,
+        default=10,
+        help="Área mínima em pixels para descartar ruído no watershed",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=8,
@@ -95,6 +114,12 @@ def parse_args() -> argparse.Namespace:
         help="Se ativado, gera os gráficos de densidade e painéis comparativos",
     )
     parser.add_argument(
+        "--no-plots",
+        dest="save_plots",
+        action="store_false",
+        help="Desativa a geração de gráficos de densidade e painéis",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="cuda" if torch.cuda.is_available() else "cpu",
@@ -110,20 +135,9 @@ def extract_instances_naive(prob_map: np.ndarray, threshold: float = 0.50) -> np
     return labeled_mask.astype(np.int64)
 
 
-def load_model(checkpoint_path: str, device: torch.device) -> torch.nn.Module:
-    """Tenta carregar o modelo a partir de src.models e os pesos do checkpoint."""
-    try:
-        from src.models import build_model
-        model = build_model()
-    except (ImportError, AttributeError):
-        try:
-            from src.models import UNet
-            model = UNet()
-        except (ImportError, AttributeError) as exc:
-            raise RuntimeError(
-                "O módulo src.models ainda não possui a classe de modelo pronta. "
-                "Aguardando a implementação do Pilar de Modelos."
-            ) from exc
+def load_model(checkpoint_path: str, device: torch.device) -> Tuple[torch.nn.Module, int]:
+    """Carrega a arquitetura a partir de src.models e os pesos do checkpoint."""
+    from src.models import build_model
 
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(
@@ -131,15 +145,38 @@ def load_model(checkpoint_path: str, device: torch.device) -> torch.nn.Module:
             "Treine o modelo antes de executar a avaliação."
         )
 
-    state_dict = torch.load(checkpoint_path, map_location=device)
-    # Suporte para checkpoints que salvam dict com 'model_state_dict' ou o próprio state_dict
-    if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
-        state_dict = state_dict["model_state_dict"]
+    state = torch.load(checkpoint_path, map_location=device)
+    model_args: Dict[str, Any] = {}
+    if isinstance(state, dict) and "model_state_dict" in state:
+        model_args = state.get("model_args", {})
+        state_dict = state["model_state_dict"]
+    else:
+        state_dict = state
 
+    out_channels = model_args.get("out_channels")
+    if out_channels is None:
+        for k in ("final_conv.weight", "final_conv.bias"):
+            if k in state_dict:
+                out_channels = state_dict[k].shape[0]
+                break
+    if out_channels is None:
+        out_channels = 1
+
+    encoder = model_args.get("encoder", "resnet34")
+    up_mode = model_args.get("up_mode", "transpose")
+    use_skips = model_args.get("use_skips", True)
+
+    model = build_model(
+        encoder=encoder,
+        out_channels=out_channels,
+        up_mode=up_mode,
+        use_skips=use_skips,
+        pretrained=False,
+    )
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
-    return model
+    return model, out_channels
 
 
 def main() -> None:
@@ -153,7 +190,15 @@ def main() -> None:
     print(f"Dispositivo: {device} | Checkpoint: {args.checkpoint}")
     print("=" * 70)
 
-    # 1. Carregar Dataset
+    # 1. Carregar Modelo
+    try:
+        model, out_channels = load_model(args.checkpoint, device)
+    except (RuntimeError, FileNotFoundError) as e:
+        print(f"\n[INFO] {e}")
+        print("Pipeline de avaliação validado estruturalmente com sucesso. Aguardando pesos do treino.")
+        return
+
+    # 2. Carregar Dataset
     if args.dataset == "dsb2018":
         if not os.path.exists(args.splits_path):
             from src.dataset import create_stratified_splits
@@ -167,20 +212,13 @@ def main() -> None:
             print(f"Aviso: Nenhuma imagem encontrada no split '{args.split}'.")
             sys.exit(1)
 
-        dataset = DSB2018Dataset(image_ids=image_ids, target_size=(256, 256))
+        dataset = DSB2018Dataset(image_ids=image_ids, target_size=(256, 256), three_class=(out_channels == 3))
     else:
-        dataset = SyntheticDataset(num_samples=100, seed=123)
+        dataset = SyntheticDataset(num_samples=100, seed=123, three_class=(out_channels == 3))
 
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
     print(f"Total de imagens a avaliar: {len(dataset)}")
-
-    # 2. Carregar Modelo
-    try:
-        model = load_model(args.checkpoint, device)
-    except (RuntimeError, FileNotFoundError) as e:
-        print(f"\n[INFO] {e}")
-        print("Pipeline de avaliação validado estruturalmente com sucesso. Aguardando pesos do treino.")
-        return
+    print(f"Decodificação: {'Watershed Multiclasse (Trilha A)' if out_channels == 3 else 'Componentes Conexos Ingênuos (Parte 1)'}")
 
     # 3. Loop de Inferência e Coleta de Métricas
     semantic_ious: List[float] = []
@@ -201,23 +239,36 @@ def main() -> None:
             batch_ids = batch.get("image_id", [f"img_{i}" for i in range(len(images))])
 
             logits = model(images)
-            probs = torch.sigmoid(logits).cpu().numpy()
+            if out_channels == 3:
+                probs = torch.softmax(logits, dim=1).cpu().numpy()
+            else:
+                probs = torch.sigmoid(logits).cpu().numpy()
 
             for b in range(len(images)):
-                prob_map = probs[b, 0]
                 gt_sem = gt_semantics[b, 0].numpy()
                 gt_inst = gt_instances[b]
                 i_id = batch_ids[b]
 
+                if out_channels == 3:
+                    prob_3c = probs[b]
+                    prob_fg = prob_3c[1] + prob_3c[2]
+                    pred_binary = (prob_fg >= args.foreground_threshold).astype(np.float32)
+                    pred_inst = watershed_instance_segmentation(
+                        prob_3c,
+                        interior_threshold=args.interior_threshold,
+                        foreground_threshold=args.foreground_threshold,
+                        min_area=args.min_area,
+                    )
+                else:
+                    prob_map = probs[b, 0]
+                    pred_binary = (prob_map >= args.threshold).astype(np.float32)
+                    pred_inst = extract_instances_naive(prob_map, threshold=args.threshold)
+
                 # Métricas Semânticas
-                pred_binary = (prob_map >= args.threshold).astype(np.float32)
                 s_iou = compute_semantic_iou(pred_binary, gt_sem)
                 s_dice = compute_semantic_dice(pred_binary, gt_sem)
                 semantic_ious.append(s_iou)
                 semantic_dices.append(s_dice)
-
-                # Pós-processamento Ingênuo (Componentes Conexos)
-                pred_inst = extract_instances_naive(prob_map, threshold=args.threshold)
 
                 # Métrica de Instâncias (Hungarian ou Greedy)
                 inst_res = evaluate_instances(pred_inst, gt_inst, method=args.matching)

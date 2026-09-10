@@ -33,10 +33,10 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.dataset import DSB2018Dataset, SyntheticDataset, create_stratified_splits, load_splits
-from src.losses import build_loss, compute_pos_weight
+from src.losses import build_loss, compute_pos_weight, compute_class_weights
 from src.metrics import compute_semantic_dice, compute_semantic_iou, evaluate_instances
 from src.models import build_model
-from src.postprocess import naive_connected_components
+from src.postprocess import naive_connected_components, watershed_instance_segmentation
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,12 +54,17 @@ def parse_args() -> argparse.Namespace:
 
     # Arquitetura (Eixo 1 das ablações)
     parser.add_argument("--encoder", choices=["resnet18", "resnet34"], default="resnet34")
+    parser.add_argument("--out_channels", type=int, choices=[1, 3], default=1, help="Canais de saída (1=binário, 3=Trilha A watershed).")
     parser.add_argument("--up_mode", choices=["transpose", "bilinear", "nearest"], default="transpose")
     parser.add_argument("--no_skips", action="store_true", help="Desliga as skip connections.")
     parser.add_argument("--no_pretrained", action="store_true", help="Treina o encoder do zero.")
 
     # Perda (Eixo 2 das ablações)
-    parser.add_argument("--loss", choices=["bce_dice", "bce", "dice", "focal"], default="bce_dice")
+    parser.add_argument(
+        "--loss",
+        choices=["bce_dice", "bce", "dice", "focal", "weighted_ce_3c", "multiclass_focal"],
+        default="bce_dice",
+    )
     parser.add_argument("--gamma", type=float, default=2.0, help="Expoente de foco da focal loss.")
     parser.add_argument("--alpha", type=float, default=0.25, help="Peso da classe positiva na focal.")
     parser.add_argument(
@@ -67,9 +72,17 @@ def parse_args() -> argparse.Namespace:
         default="none",
         help="Peso da classe positiva na BCE: 'none', 'auto' ou um número.",
     )
+    parser.add_argument(
+        "--class_weights",
+        default="auto",
+        help="Pesos de classes para perdas multiclasse: 'auto', 'none' ou lista (ex: '1.0,2.5,8.0').",
+    )
 
     # Decodificação em instâncias
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--interior_threshold", type=float, default=0.5, help="Limiar de semente de interior no watershed.")
+    parser.add_argument("--foreground_threshold", type=float, default=0.5, help="Limiar de foreground no watershed.")
+    parser.add_argument("--min_area", type=int, default=10, help="Área mínima para descartar ruído no watershed.")
     parser.add_argument("--connectivity", type=int, choices=[1, 2], default=1)
     parser.add_argument("--min_size", type=int, default=0)
     parser.add_argument("--matching", choices=["hungarian", "greedy"], default="hungarian")
@@ -126,10 +139,11 @@ def build_dataloaders(args: argparse.Namespace) -> Tuple[DataLoader, DataLoader]
     Raises:
         FileNotFoundError: Se o DSB2018 for pedido e os dados não estiverem em disco.
     """
+    is_3c = (args.out_channels == 3)
     if args.dataset == "synthetic":
-        train_set: Any = SyntheticDataset(num_samples=args.num_samples, seed=None)
+        train_set: Any = SyntheticDataset(num_samples=args.num_samples, seed=None, three_class=is_3c)
         # Validação com seed fixa: as mesmas imagens em toda época e em toda execução.
-        val_set: Any = SyntheticDataset(num_samples=100, seed=12345)
+        val_set: Any = SyntheticDataset(num_samples=100, seed=12345, three_class=is_3c)
     else:
         if not os.path.isdir(args.data_dir):
             raise FileNotFoundError(
@@ -146,8 +160,8 @@ def build_dataloaders(args: argparse.Namespace) -> Tuple[DataLoader, DataLoader]
             )
 
         size = (args.target_size, args.target_size)
-        train_set = DSB2018Dataset(args.data_dir, image_ids=splits["train"], target_size=size)
-        val_set = DSB2018Dataset(args.data_dir, image_ids=splits["val"], target_size=size)
+        train_set = DSB2018Dataset(args.data_dir, image_ids=splits["train"], target_size=size, three_class=is_3c)
+        val_set = DSB2018Dataset(args.data_dir, image_ids=splits["val"], target_size=size, three_class=is_3c)
 
     generator = torch.Generator()
     generator.manual_seed(args.seed)
@@ -201,6 +215,32 @@ def resolve_pos_weight(spec: str, loader: DataLoader, max_batches: int = 20) -> 
     return value
 
 
+def resolve_class_weights(spec: str, loader: DataLoader, max_batches: int = 20) -> Optional[List[float]]:
+    """Interpreta o argumento --class_weights, estimando da amostra quando for 'auto'."""
+    if spec == "none":
+        return None
+
+    if spec != "auto":
+        return [float(x.strip()) for x in spec.split(",")]
+
+    targets: List[torch.Tensor] = []
+    for i, batch in enumerate(loader):
+        if "mask_three_class" in batch:
+            targets.append(batch["mask_three_class"])
+        if i + 1 >= max_batches:
+            break
+
+    if not targets:
+        return [1.0, 2.5, 8.0]
+
+    w = compute_class_weights(torch.cat(targets), num_classes=3)
+    # Suavização suave por raiz quadrada para evitar gradientes desestabilizadores
+    w_smoothed = (w / w[0]).sqrt()
+    weights_list = [round(float(v), 3) for v in w_smoothed]
+    print(f"pesos de 3 classes estimados do treino: {weights_list}")
+    return weights_list
+
+
 def train_one_epoch(
     model: torch.nn.Module,
     loader: DataLoader,
@@ -208,6 +248,7 @@ def train_one_epoch(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     desc: str,
+    out_channels: int = 1,
 ) -> float:
     """Roda uma época de treino.
 
@@ -218,6 +259,7 @@ def train_one_epoch(
         optimizer: Otimizador.
         device: Dispositivo de execução.
         desc: Rótulo da barra de progresso.
+        out_channels: 1 para segmentação binária, 3 para Trilha A (fundo, interior, fronteira).
 
     Returns:
         Perda média da época.
@@ -227,7 +269,10 @@ def train_one_epoch(
 
     for batch in tqdm(loader, desc=desc, leave=False):
         images = batch["image"].to(device, non_blocking=True)
-        targets = batch["mask_semantic"].to(device, non_blocking=True)
+        if out_channels == 3:
+            targets = batch["mask_three_class"].to(device, non_blocking=True)
+        else:
+            targets = batch["mask_semantic"].to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
         loss = loss_fn(model(images), targets)
@@ -255,7 +300,7 @@ def validate(
         loader: DataLoader de validação.
         loss_fn: Função de perda, para acompanhar a perda de validação.
         device: Dispositivo de execução.
-        args: Argumentos da execução (limiar, conectividade, matching).
+        args: Argumentos da execução (limiar, conectividade, matching, out_channels).
 
     Returns:
         Tupla (métricas agregadas, registros por imagem).
@@ -267,13 +312,20 @@ def validate(
 
     for batch in tqdm(loader, desc="validação", leave=False):
         images = batch["image"].to(device, non_blocking=True)
-        targets = batch["mask_semantic"].to(device, non_blocking=True)
+        if args.out_channels == 3:
+            targets = batch["mask_three_class"].to(device, non_blocking=True)
+        else:
+            targets = batch["mask_semantic"].to(device, non_blocking=True)
 
         logits = model(images)
         total_loss += loss_fn(logits, targets).item()
         n_batches += 1
 
-        probs = torch.sigmoid(logits).cpu().numpy()
+        if args.out_channels == 3:
+            probs = torch.softmax(logits, dim=1).cpu().numpy()
+        else:
+            probs = torch.sigmoid(logits).cpu().numpy()
+
         gt_semantic = batch["mask_semantic"].numpy()
         gt_instance = batch["mask_instance"].numpy()
 
@@ -281,15 +333,25 @@ def validate(
         ids = batch.get("image_id")
 
         for i in range(images.shape[0]):
-            pred_labels = naive_connected_components(
-                probs[i],
-                threshold=args.threshold,
-                from_logits=False,
-                connectivity=args.connectivity,
-                min_size=args.min_size,
-            )
+            if args.out_channels == 3:
+                pred_labels = watershed_instance_segmentation(
+                    probs[i],
+                    interior_threshold=args.interior_threshold,
+                    foreground_threshold=args.foreground_threshold,
+                    min_area=args.min_area,
+                    connectivity=args.connectivity,
+                )
+                pred_binary = ((probs[i, 1] + probs[i, 2]) >= args.foreground_threshold).astype(np.float32)
+            else:
+                pred_labels = naive_connected_components(
+                    probs[i],
+                    threshold=args.threshold,
+                    from_logits=False,
+                    connectivity=args.connectivity,
+                    min_size=args.min_size,
+                )
+                pred_binary = (probs[i] >= args.threshold).astype(np.float32)
 
-            pred_binary = (probs[i] >= args.threshold).astype(np.float32)
             instance_result = evaluate_instances(
                 pred_labels, gt_instance[i], method=args.matching
             )
@@ -337,7 +399,7 @@ def save_checkpoint(path: str, model: torch.nn.Module, args: argparse.Namespace,
             "model_state_dict": model.state_dict(),
             "model_args": {
                 "encoder": args.encoder,
-                "out_channels": 1,
+                "out_channels": args.out_channels,
                 "up_mode": args.up_mode,
                 "use_skips": not args.no_skips,
                 "pretrained": not args.no_pretrained,
@@ -366,7 +428,7 @@ def main() -> None:
 
     model = build_model(
         encoder=args.encoder,
-        out_channels=1,
+        out_channels=args.out_channels,
         up_mode=args.up_mode,
         use_skips=not args.no_skips,
         pretrained=not args.no_pretrained,
@@ -375,9 +437,15 @@ def main() -> None:
     loss_kwargs: Dict[str, Any] = {}
     if args.loss == "focal":
         loss_kwargs = {"alpha": args.alpha, "gamma": args.gamma}
+    elif args.loss in ("weighted_ce_3c", "multiclass_focal"):
+        weights = resolve_class_weights(args.class_weights, train_loader)
+        if args.loss == "weighted_ce_3c":
+            loss_kwargs = {"class_weights": weights}
+        else:
+            loss_kwargs = {"alpha": weights, "gamma": args.gamma}
     else:
         loss_kwargs = {"pos_weight": resolve_pos_weight(args.pos_weight, train_loader)}
-    loss_fn = build_loss(args.loss, **loss_kwargs)
+    loss_fn = build_loss(args.loss, **loss_kwargs).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -392,7 +460,13 @@ def main() -> None:
         epoch_started = time.time()
 
         train_loss = train_one_epoch(
-            model, train_loader, loss_fn, optimizer, device, f"época {epoch}/{args.epochs}"
+            model,
+            train_loader,
+            loss_fn,
+            optimizer,
+            device,
+            f"época {epoch}/{args.epochs}",
+            out_channels=args.out_channels,
         )
         val_metrics, val_records = validate(model, val_loader, loss_fn, device, args)
 
