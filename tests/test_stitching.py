@@ -3,9 +3,26 @@
 import unittest
 
 import numpy as np
+import torch
+import torch.nn as nn
 
 from src.metrics import evaluate_instances
+from src.mosaic import predict_tiled_naive
 from src.stitching import compose_tiles_without_fusion, stitch_tiles_with_fusion
+
+
+class _FullForegroundModel(nn.Module):
+    """Mock que produz uma única instância cobrindo cada tile."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.anchor = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch, _, height, width = x.shape
+        logits = torch.full((batch, 3, height, width), -8.0, device=x.device)
+        logits[:, 1] = 8.0 + self.anchor
+        return logits
 
 
 class StitchingTests(unittest.TestCase):
@@ -66,6 +83,25 @@ class StitchingTests(unittest.TestCase):
         result = stitch_tiles_with_fusion([first, second], self.boxes, (6, 10))
         self.assertEqual(result.dtype, np.int64)
         self.assertEqual(set(np.unique(result)), {0, 1})
+
+    def test_integracao_com_pipeline_de_mosaico(self) -> None:
+        image = np.zeros((192, 192, 3), dtype=np.float32)
+        tiled = predict_tiled_naive(
+            image,
+            model=_FullForegroundModel().eval(),
+            tile_size=128,
+            stride=64,
+            mode="center_crop",
+            min_area=0,
+        )
+        stitched = stitch_tiles_with_fusion(
+            tiled["tiles_preds"],
+            tiled["tile_boxes"],
+            image.shape[:2],
+            iou_overlap_threshold=0.5,
+        )
+        self.assertEqual(stitched.shape, image.shape[:2])
+        self.assertEqual(set(np.unique(stitched)), {1})
 
     def test_valida_shapes_e_tipos(self) -> None:
         with self.assertRaises(ValueError):

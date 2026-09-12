@@ -255,3 +255,65 @@ def compose_tiles_without_fusion(
         node_indices,
         _DisjointSet.create(len(nodes)),
     )
+
+
+def plot_stitching_comparison(
+    image: np.ndarray,
+    ground_truth: np.ndarray,
+    naive_prediction: np.ndarray,
+    stitched_prediction: np.ndarray,
+    save_path: str,
+    before_map: float | None = None,
+    after_map: float | None = None,
+) -> None:
+    """Salva o painel obrigatório Imagem | GT | Antes | Depois."""
+    import os
+
+    import matplotlib.pyplot as plt
+
+    from src.utils import colorize_instances, overlay_mask_on_image
+
+    image = np.asarray(image)
+    ground_truth = np.asarray(ground_truth)
+    naive_prediction = np.asarray(naive_prediction)
+    stitched_prediction = np.asarray(stitched_prediction)
+    if image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError("image deve ter shape (H, W, 3).")
+    expected_shape = image.shape[:2]
+    for name, mask in (
+        ("ground_truth", ground_truth),
+        ("naive_prediction", naive_prediction),
+        ("stitched_prediction", stitched_prediction),
+    ):
+        if mask.shape != expected_shape:
+            raise ValueError(f"{name} deve ter shape {expected_shape}; recebeu {mask.shape}.")
+
+    panels = [
+        image,
+        overlay_mask_on_image(image, colorize_instances(ground_truth, seed=42), alpha=0.55),
+        overlay_mask_on_image(image, colorize_instances(naive_prediction, seed=99), alpha=0.55),
+        overlay_mask_on_image(image, colorize_instances(stitched_prediction, seed=99), alpha=0.55),
+    ]
+    counts = [
+        len(np.unique(mask)) - (1 if 0 in mask else 0)
+        for mask in (ground_truth, naive_prediction, stitched_prediction)
+    ]
+    before_suffix = "" if before_map is None else f" | mAP {before_map:.4f}"
+    after_suffix = "" if after_map is None else f" | mAP {after_map:.4f}"
+    titles = [
+        "Imagem",
+        f"Ground truth | {counts[0]} instâncias",
+        f"Antes da fusão | {counts[1]} instâncias{before_suffix}",
+        f"Depois da fusão | {counts[2]} instâncias{after_suffix}",
+    ]
+
+    fig, axes = plt.subplots(1, 4, figsize=(22, 5.5), dpi=150)
+    for axis, panel, title in zip(axes, panels, titles):
+        axis.imshow(panel)
+        axis.set_title(title, fontsize=10, fontweight="bold")
+        axis.set_axis_off()
+    fig.suptitle("Inferência em mosaico: efeito da fusão entre tiles", fontweight="bold")
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    fig.savefig(save_path, bbox_inches="tight", dpi=180)
+    plt.close(fig)

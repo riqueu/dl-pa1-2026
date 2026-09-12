@@ -158,6 +158,14 @@ python evaluate.py --checkpoint checkpoints/best_model.pth --dataset dsb2018 --s
 python evaluate.py --checkpoint checkpoints/part2_watershed.pth --dataset dsb2018 --split val --matching hungarian --output-dir outputs/part2_eval
 ```
 
+### 4.5. Inferência em Mosaico com Fusão de Instâncias
+
+Compara o tiling ingênuo com a costura por IoU na faixa de sobreposição:
+
+```bash
+python scripts/run_mosaic_demo.py --checkpoint checkpoints/part2_watershed.pth --tile_size 256 --stride 128 --iou_overlap_threshold 0.20 --output_dir outputs/part4_mosaic
+```
+
 ---
 
 ## 5. Notebook de Inferência e Checkpoints
