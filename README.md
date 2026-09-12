@@ -43,7 +43,9 @@ dl-pa1-2026
 │   ├── parte0e1.md        # Planejamento das Partes 0 e 1
 │   ├── parte2.md          # Planejamento da Trilha A (Watershed)
 │   ├── parte3.md          # Planejamento das Ablações (Eixos 1 e 2)
-│   └── parte4.md          # Planejamento de Mosaico e Costura de Instâncias
+│   ├── parte4.md          # Planejamento de Mosaico e Costura de Instâncias
+│   ├── parte5.md          # Planejamento da Galeria de Falhas e Diagnósticos
+│   └── parte6.md          # Planejamento do Teste de Estresse (Escala e ASPP)
 ├── evaluate.py            # Avaliação em lote no conjunto de teste/validação
 ├── LICENSE
 ├── notebooks/
