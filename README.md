@@ -19,39 +19,56 @@ Este projeto implementa e avalia métodos autorais de segmentação de instânci
 
 ### Resumo Comparativo de Desempenho (Validação DSB2018, Hungarian Matching)
 
-| Abordagem | mAP@[.50:.95] | AP @ IoU 0.50 | Erro Médio Contagem | IoU Semântico |
-| :--- | :---: | :---: | :---: | :---: |
-| **Parte 1: Baseline Semântico** (Componentes Conexos) | 0.4820 | 0.6611 | 8.55 núcleos/img | **0.8439** |
-| **Parte 2: Trilha A** (Fronteiras e Watershed) | **0.5157** | **0.7165** | **7.40 núcleos/img** | 0.8236 |
-| *Caso Crítico Denso (369 núcleos) — Baseline* | *0.1443* | *—* | *174 núcleos (fusão)* | *—* |
-| *Caso Crítico Denso (369 núcleos) — Trilha A* | **0.3374** | *—* | **47 núcleos (-73%)** | *—* |
+| Parte / Abordagem | Configuração | mAP@[.50:.95] | AP @ IoU 0.50 | Erro Médio Contagem | IoU Semântico |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Parte 1: Baseline Semântico** | U-Net ResNet34 (Componentes Conexos) | 0.4820 | 0.6611 | 8.55 núcleos/img | **0.8439** |
+| **Parte 2: Trilha A Oficial** | U-Net ResNet34 (Fronteiras e Watershed) | **0.5157** | **0.7165** | **7.40 núcleos/img** | 0.8236 |
+| *Caso Crítico Denso (369 núcleos)* | *Baseline Semântico (Fusão Severa)* | *0.1443* | *—* | *174 núcleos (subcontagem)* | *—* |
+| *Caso Crítico Denso (369 núcleos)* | *Trilha A (Watershed Desacoplado)* | **0.3374** | *—* | **47 núcleos (-73% erro)** | *—* |
+| **Parte 3: Eixo 1 (Resolução)** | U-Net Padrão (Skip Connections) | **0.4901 ± 0.0210** | **0.7098 ± 0.0076** | **5.99 ± 0.11** | **0.8125 ± 0.0105** |
+| **Parte 3: Eixo 1 (Resolução)** | U-Net sem Skips (Gargalo Cego) | 0.2172 ± 0.0713 | 0.4354 ± 0.1190 | 19.54 ± 6.97 | 0.6407 ± 0.0784 |
+| **Parte 3: Eixo 1 (Resolução)** | DeepLabv3 (Atrous OS16 + ASPP) | 0.1588 ± 0.0008 | 0.3541 ± 0.0029 | 25.34 ± 0.91 | 0.6002 ± 0.0037 |
+| **Parte 3: Eixo 2 (Perdas)** | Cross-Entropy Ponderada ($\alpha$) | **0.5002 ± 0.0155** | **0.7141 ± 0.0024** | 7.25 ± 0.15 | **0.8134 ± 0.0102** |
+| **Parte 3: Eixo 2 (Perdas)** | Focal Loss ($\gamma = 0$) | **0.5015 ± 0.0205** | **0.7140 ± 0.0096** | **7.07 ± 0.37** | 0.8083 ± 0.0139 |
+| **Parte 3: Eixo 2 (Perdas)** | Focal Loss ($\gamma = 5$) | 0.3636 ± 0.0059 | 0.6329 ± 0.0188 | 10.32 ± 0.96 | 0.7533 ± 0.0060 |
+| **Parte 4: Mosaico 2x2 (310 GT)** | Tiling Ingênuo (Center-Crop) | 0.3898 | 0.6744 | +33 núcleos | — |
+| **Parte 4: Mosaico 2x2 (310 GT)** | Costura com Fusão (Union-Find, $\tau=0.20$) | **0.4413 (+5.15 pp)** | **0.7479 (+7.35 pp)** | **+4 núcleos** | — |
 
 ```bash
 dl-pa1-2026
 ├── AI_LOG.md              # Registro conciso de assistência de IA
 ├── checkpoints/           # Pesos dos modelos treinados (.pth)
 ├── data/                  # DSB2018 stage1_train e splits estratificados
-├── docs/                  # Planos técnicos e divisão de tarefas para a dupla
-│   ├── parte0e1.md        # Especificação das Partes 0 e 1
-│   ├── parte2.md          # Especificação da Trilha A (Watershed)
-│   ├── parte3.md          # Especificação das Ablações (Eixos 1 e 2)
-│   └── parte4.md          # Especificação de Mosaico e Stitching
+├── docs/                  # Guias de planejamento e divisão de tarefas da dupla
+│   ├── parte0e1.md        # Planejamento das Partes 0 e 1
+│   ├── parte2.md          # Planejamento da Trilha A (Watershed)
+│   ├── parte3.md          # Planejamento das Ablações (Eixos 1 e 2)
+│   └── parte4.md          # Planejamento de Mosaico e Costura de Instâncias
 ├── evaluate.py            # Avaliação em lote no conjunto de teste/validação
 ├── LICENSE
 ├── notebooks/
 │   ├── exploratory.ipynb  # Prototipação e inspeção de dados
-│   └── inferencia.ipynb   # Notebook obrigatório e vitrine central do projeto
+│   └── inferencia.ipynb   # Vitrine técnica completa (Partes 0 a 4)
 ├── PA1.pdf
 ├── README.md
 ├── requirements.txt
+├── scripts/               # Scripts de automação e reprodução
+│   ├── run_eixo1.sh       # Execução da grade do Eixo 1
+│   ├── run_eixo2.sh       # Execução da grade do Eixo 2
+│   ├── run_mosaic_demo.py # Demonstração integrada de tiling e fusão
+│   ├── summarize_eixo1.py # Consolidação de métricas do Eixo 1
+│   └── summarize_eixo2.py # Consolidação de métricas do Eixo 2
 ├── src/
 │   ├── dataset.py         # Datasets reais, gerador sintético e alvos 3-classes
 │   ├── __init__.py
 │   ├── losses.py          # CE balanceada, Focal Loss multiclasse e pesos
 │   ├── metrics.py         # Matching Hungarian/Greedy e cálculo de mAP@[.50:.95]
-│   ├── models.py          # U-Net autoral com encoder ResNet34
+│   ├── models.py          # U-Net autoral, ASPP e variantes DeepLab
+│   ├── mosaic.py          # Montagem de mosaicos e janelas deslizantes
 │   ├── postprocess.py     # Componentes conexos e decodificação Watershed
-│   └── utils.py           # Colorização, overlay e gráficos diagnósticos
+│   ├── stitching.py      # Fusão de instâncias via IoU e Union-Find
+│   └── utils.py           # Colorização, overlay e campo receptivo teórico
+├── tests/                 # Suíte de testes unitários (12 testes passando)
 └── train.py               # Pipeline de treino configurável via argumentos CLI
 ```
 
@@ -158,13 +175,36 @@ python evaluate.py --checkpoint checkpoints/best_model.pth --dataset dsb2018 --s
 python evaluate.py --checkpoint checkpoints/part2_watershed.pth --dataset dsb2018 --split val --matching hungarian --output-dir outputs/part2_eval
 ```
 
-### 4.5. Inferência em Mosaico com Fusão de Instâncias
+### 4.5. Execução das Ablações Sistemáticas (Parte 3 — Eixos 1 e 2)
 
-Compara o tiling ingênuo com a costura por IoU na faixa de sobreposição:
+O pipeline de ablações executa 2 seeds por configuração com pesos padronizados:
 
 ```bash
-python scripts/run_mosaic_demo.py --checkpoint checkpoints/part2_watershed.pth --tile_size 256 --stride 128 --iou_overlap_threshold 0.20 --output_dir outputs/part4_mosaic
+# Eixo 1: Recuperação de Resolução (U-Net Skips vs. Gargalo vs. DeepLabv3 ASPP)
+PA1_CLASS_WEIGHTS="1.0,2.877,5.731" bash scripts/run_eixo1.sh
+python scripts/summarize_eixo1.py
+
+# Eixo 2: Funções de Perda e Fator γ (CE Ponderada vs. Focal γ=0, 1, 2, 5)
+bash scripts/run_eixo2.sh
+python scripts/summarize_eixo2.py
 ```
+
+Tabelas consolidadas (média ± desvio e por seed), cálculo de campo receptivo teórico e curvas comparativas estão disponíveis diretamente em [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb) e salvos em `outputs/part3_eixo1/` e `outputs/part3_eixo2/`.
+
+### 4.6. Inferência em Mosaico com Fusão de Instâncias (Parte 4)
+
+Compara o tiling ingênuo (center-crop e direct-stamp) com a costura via Hungarian matching local e Union-Find:
+
+```bash
+python scripts/run_mosaic_demo.py \
+  --checkpoint checkpoints/part2_watershed.pth \
+  --tile_size 256 \
+  --stride 128 \
+  --iou_overlap_threshold 0.20 \
+  --output_dir outputs/part4_mosaic
+```
+
+Demonstração interativa, tabela quantitativa antes vs. depois e diagnósticos visuais de reconciliação de bordas estão disponíveis em [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb).
 
 ---
 
