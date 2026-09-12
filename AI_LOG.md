@@ -20,5 +20,5 @@ Documentação sintética do uso de ferramentas de IA no PA1, servindo como indi
 
 ## Episódio 3: Execução, Avaliação e Validação Técnica do Pipeline
 * **Contexto:** Treinamento das etapas iniciais (teste sintético e baseline semântico no DSB2018), validação de reprodutibilidade e quantificação empírica das limitações da abordagem ingênua por componentes conexos.
-* **Uso da IA:** Apoio na estruturação dos pipelines de treino e avaliação em lote (`train.py`, `evaluate.py`), na formulação dos gráficos de diagnóstico (mAP vs. densidade de núcleos) e na montagem do caderno central de inferência (`inferencia.ipynb`) como vitrine técnica do projeto.
-* **Decisão Técnica:** Fixação dos splits estratificados (`data/splits.json`) e escolha formal da Trilha A (Fronteiras e Watershed) para a resolução do colapso em aglomerados densos.
+* **Uso da IA:** Apoio na estruturação dos pipelines de treino e avaliação em lote (`train.py`, `evaluate.py`), na automação da grade de ablações de perda (Parte 3, Eixo 2), na formulação dos gráficos de diagnóstico e na montagem do caderno central de inferência (`inferencia.ipynb`) como vitrine técnica do projeto.
+* **Decisão Técnica:** Fixação dos splits estratificados (`data/splits.json`), otimização vetorizada de IoU pareado por histograma e identificação do ponto ótimo em $\gamma=0$ para decodificação por watershed.

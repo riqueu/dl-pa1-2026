@@ -93,6 +93,9 @@ def compute_pairwise_iou_matrix(
 ) -> np.ndarray:
     """Calcula a matriz de IoU pareado entre instâncias preditas e ground truth.
 
+    Implementação vetorizada em passo único via histograma 2D (np.bincount),
+    evitando loops quadráticos lentos em imagens densas com centenas de núcleos.
+
     Args:
         pred_mask: Matriz 2D (H, W) com IDs de instâncias preditas (0 = fundo).
         gt_mask: Matriz 2D (H, W) com IDs de instâncias reais (0 = fundo).
@@ -110,25 +113,32 @@ def compute_pairwise_iou_matrix(
 
     iou_matrix = np.zeros((n_pred, n_gt), dtype=np.float32)
 
-    # Vetorização / máscaras booleanas
-    for i, p_id in enumerate(pred_ids):
-        p_area = (pred_mask == p_id)
-        p_count = p_area.sum()
-        if p_count == 0:
-            continue
+    p_flat = pred_mask.ravel().astype(np.int64)
+    g_flat = gt_mask.ravel().astype(np.int64)
+    max_g = int(g_flat.max()) + 1
 
-        for j, g_id in enumerate(gt_ids):
-            g_area = (gt_mask == g_id)
-            g_count = g_area.sum()
-            if g_count == 0:
-                continue
+    fg = (p_flat > 0) & (g_flat > 0)
+    if not fg.any():
+        return iou_matrix
 
-            intersection = np.logical_and(p_area, g_area).sum()
-            if intersection == 0:
-                continue
+    p_areas = np.bincount(p_flat)
+    g_areas = np.bincount(g_flat)
 
-            union = p_count + g_count - intersection
-            iou_matrix[i, j] = float(intersection / union)
+    pair_ids = p_flat[fg] * max_g + g_flat[fg]
+    counts = np.bincount(pair_ids)
+
+    p_idx_map = {pid: i for i, pid in enumerate(pred_ids)}
+    g_idx_map = {gid: j for j, gid in enumerate(gt_ids)}
+
+    nonzeros = np.nonzero(counts)[0]
+    for idx in nonzeros:
+        pid = idx // max_g
+        gid = idx % max_g
+        if pid in p_idx_map and gid in g_idx_map:
+            inter = counts[idx]
+            union = p_areas[pid] + g_areas[gid] - inter
+            if union > 0:
+                iou_matrix[p_idx_map[pid], g_idx_map[gid]] = float(inter / union)
 
     return iou_matrix
 
