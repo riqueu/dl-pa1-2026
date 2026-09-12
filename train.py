@@ -58,6 +58,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--up_mode", choices=["transpose", "bilinear", "nearest"], default="transpose")
     parser.add_argument("--no_skips", action="store_true", help="Desliga as skip connections.")
     parser.add_argument("--no_pretrained", action="store_true", help="Treina o encoder do zero.")
+    parser.add_argument(
+        "--decoder_type",
+        choices=["unet", "aspp"],
+        default="unet",
+        help="Mecanismo de recuperação de resolução da ablação arquitetural.",
+    )
+    parser.add_argument(
+        "--output_stride",
+        type=int,
+        choices=[16, 32],
+        default=None,
+        help="Stride final do encoder (default: 32 para U-Net e 16 para ASPP).",
+    )
+    parser.add_argument(
+        "--aspp_rates",
+        type=int,
+        nargs=3,
+        default=[6, 12, 18],
+        metavar=("R1", "R2", "R3"),
+        help="Taxas de dilatação dos três ramos 3x3 do ASPP.",
+    )
 
     # Perda (Eixo 2 das ablações)
     parser.add_argument(
@@ -403,6 +424,9 @@ def save_checkpoint(path: str, model: torch.nn.Module, args: argparse.Namespace,
                 "up_mode": args.up_mode,
                 "use_skips": not args.no_skips,
                 "pretrained": not args.no_pretrained,
+                "decoder_type": args.decoder_type,
+                "output_stride": args.output_stride or (16 if args.decoder_type == "aspp" else 32),
+                "aspp_rates": list(args.aspp_rates),
             },
             "epoch": epoch,
             "metrics": metrics,
@@ -413,10 +437,12 @@ def save_checkpoint(path: str, model: torch.nn.Module, args: argparse.Namespace,
 
 def main() -> None:
     args = parse_args()
+    if args.decoder_type == "aspp" and args.no_skips:
+        raise ValueError("--no_skips só se aplica a --decoder_type unet.")
     set_seed(args.seed)
 
     run_name = args.out or os.path.join(
-        "runs", f"{args.dataset}_{args.loss}_{args.up_mode}_seed{args.seed}"
+        "runs", f"{args.dataset}_{args.decoder_type}_{args.loss}_{args.up_mode}_seed{args.seed}"
     )
     os.makedirs(run_name, exist_ok=True)
 
@@ -432,6 +458,9 @@ def main() -> None:
         up_mode=args.up_mode,
         use_skips=not args.no_skips,
         pretrained=not args.no_pretrained,
+        decoder_type=args.decoder_type,
+        output_stride=args.output_stride,
+        aspp_rates=args.aspp_rates,
     ).to(device)
 
     loss_kwargs: Dict[str, Any] = {}
