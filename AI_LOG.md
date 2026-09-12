@@ -20,5 +20,12 @@ Documentação sintética do uso de ferramentas de IA no PA1, servindo como indi
 
 ## Episódio 3: Execução, Avaliação e Validação Técnica do Pipeline
 * **Contexto:** Treinamento das etapas iniciais (teste sintético e baseline semântico no DSB2018), validação de reprodutibilidade e quantificação empírica das limitações da abordagem ingênua por componentes conexos.
-* **Uso da IA:** Apoio na estruturação dos pipelines de treino e avaliação em lote (`train.py`, `evaluate.py`), na formulação dos gráficos de diagnóstico (mAP vs. densidade de núcleos) e na montagem do caderno central de inferência (`inferencia.ipynb`) como vitrine técnica do projeto.
-* **Decisão Técnica:** Fixação dos splits estratificados (`data/splits.json`) e escolha formal da Trilha A (Fronteiras e Watershed) para a resolução do colapso em aglomerados densos.
+* **Uso da IA:** Apoio na estruturação dos pipelines de treino e avaliação em lote (`train.py`, `evaluate.py`), na automação da grade de ablações de perda (Parte 3, Eixo 2), na formulação dos gráficos de diagnóstico e na montagem do caderno central de inferência (`inferencia.ipynb`) como vitrine técnica do projeto.
+* **Decisão Técnica:** Fixação dos splits estratificados (`data/splits.json`), otimização vetorizada de IoU pareado por histograma e identificação do ponto ótimo em $\gamma=0$ para decodificação por watershed.
+
+---
+
+## Episódio 4: Inferência em Mosaico e Diagnóstico de Falha em Bordas (Parte 4)
+* **Contexto:** Montagem de imagens grandes ($512 \times 512$), inferência em janelas deslizantes sobrepostas ($256 \times 256$, stride 128) e diagnóstico da quebra de instâncias na fronteira sem fusão.
+* **Uso da IA:** Auxílio na implementação do módulo `src/mosaic.py`, automação do pipeline de teste em grade e lâminas contínuas (`scripts/run_mosaic_demo.py`), diagnóstico geométrico de fatiamento de núcleos e geração dos plots com zoom.
+* **Decisão Técnica:** Desacoplamento estrito entre geração de tiles/predições e o algoritmo de costura do Membro B (`src/stitching.py`), com quantificação do colapso de mAP (queda de $\sim 0.5157$ para $0.3898$ em grade e $0.2079$ em lâmina contínua) e inflação de contagem por fragmentação.

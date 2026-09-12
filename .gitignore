@@ -225,6 +225,7 @@ data/synthetic/
 
 # checkpoints intermediários
 checkpoints/*.pth
+checkpoints/**/*.pth
 
 # Pesos NÃO vão para o git: ~99 MB por checkpoint infla todo clone para sempre.
 # O PA1 aceita link para o modelo final ("link se for grande"); publicar como
