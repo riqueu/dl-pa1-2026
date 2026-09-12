@@ -2,7 +2,7 @@
 
 Este documento estabelece o plano técnico, os contratos de código, o protocolo experimental e a fundamentação teórica formal para a execução da **Parte 6 — Teste de Estresse (Opção 3: Mudança de Escala)** do PA1 (Deep Learning — FGV EMAp).
 
-**Responsável:** Membro B (Isaías Silveira da Silva)  
+**Responsável:** Membro B (Isaias Gouvêa Gonçalves)  
 **Branch de Desenvolvimento:** `feature/part6-scale-stress`  
 **Dataset:** Data Science Bowl 2018 (DSB2018) — Split de validação (67 imagens)  
 **Modelos Avaliados:** 
