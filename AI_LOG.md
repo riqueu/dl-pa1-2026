@@ -29,3 +29,10 @@ Documentação sintética do uso de ferramentas de IA no PA1, servindo como indi
 * **Contexto:** Implementar o Eixo 1 da Parte 3 sem confundir um ASPP isolado no gargalo com o mecanismo completo de preservação de resolução descrito no enunciado.
 * **Uso da IA:** Apoio na revisão do plano, na implementação pareada do encoder ResNet34 com *output stride* 16, do ASPP autoral e dos contratos de checkpoint, além da criação de testes de regressão e automação das duas seeds.
 * **Decisão Técnica:** A variante DeepLab remove o stride do `layer4`, aplica dilatação 2 e usa ASPP com taxas 6, 12 e 18. A U-Net permanece inalterada por padrão, garantindo a recarga estrita dos checkpoints anteriores.
+
+---
+
+## Episódio 5: Fusão de Instâncias em Inferência por Tiles
+* **Contexto:** Corrigir a duplicação e fragmentação de núcleos quando cada tile sobreposto é decodificado independentemente por watershed.
+* **Uso da IA:** Apoio no desenho e teste de uma costura baseada em matching local por IoU, Union-Find e arbitragem espacial dos pixels conflitantes.
+* **Decisão Técnica:** Cada par `(tile, id_local)` recebe uma identidade provisória; correspondências um-para-um na faixa de sobreposição são unidas transitivamente e os IDs globais são renumerados. A versão sem fusão usa a mesma regra de composição para permitir uma comparação controlada antes/depois.

@@ -138,3 +138,32 @@ def stitch_tiles_with_fusion(
 | **P4.1** | Henrique | Parte 4 | Criar `src/mosaic.py`, montar mosaico $512\times 512$ e tiling ingênuo. | Demonstração clara da fragmentação e duplicação de núcleos. |
 | **P4.2** | Isaias | Parte 4 | Criar `src/stitching.py` com algoritmo de união na sobreposição. | Fusão restabelece núcleos cortados e reduz erro de contagem. |
 | **P4.3** | Ambos | Parte 4 | Avaliação comparativa mAP antes/depois da fusão e integração final. | Ganho expressivo de mAP reportado após a costura de instâncias. |
+
+---
+
+## 6. Estado da Implementação da Fusão
+
+A branch `feature/part4-instance-stitching` deriva diretamente de
+`feature/part3-eixo1-resolution`, preservando a hierarquia acordada para o
+desenvolvimento.
+
+O módulo `src/stitching.py` já oferece:
+
+- validação do contrato de máscaras locais e caixas globais semiabertas;
+- atribuição de identidades provisórias únicas por `(tile, id_local)`;
+- matching guloso um-para-um por IoU restrito à faixa de sobreposição;
+- Union-Find com compressão de caminho e união por tamanho;
+- resolução de conflitos pela proximidade normalizada ao centro do tile;
+- renumeração final dos IDs para `1..K`;
+- composição sem fusão para medir formalmente o resultado antes da correção.
+
+Os testes em `tests/test_stitching.py` cobrem fusão simples, não fusão de
+objetos distintos, união transitiva em três tiles, tiles vazios, IDs não
+consecutivos, validação de entradas e ganho de mAP no caso sintético. A
+integração com `src/mosaic.py` dependerá apenas deste contrato:
+
+```python
+tiles_preds: list[np.ndarray]                 # máscaras (h, w), IDs locais
+tile_boxes: list[tuple[int, int, int, int]]  # ymin, xmin, ymax, xmax
+full_shape: tuple[int, int]                  # altura, largura
+```
