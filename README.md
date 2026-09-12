@@ -16,6 +16,7 @@ Este projeto implementa e avalia métodos autorais de segmentação de instânci
 3. **Parte 2 (Instance Head — Trilha A: Fronteiras e Watershed):** Segmentação multitarefa em 3 classes ($P(\text{fundo}), P(\text{interior}), P(\text{fronteira})$) com Cross-Entropy balanceada e decodificação topográfica por Watershed, superando o baseline em mAP (+3.37 p.p. global e +19.31 p.p. no caso denso).
 4. **Parte 3 (Ablações):** Eixo 1 (Recuperação de Resolução: U-Net Skips vs. DeepLab ASPP vs. No-Skips) e Eixo 2 (Perdas e Desbalanceamento: CE Ponderada vs. Focal Loss $\gamma \in \{0, 1, 2, 5\}$).
 5. **Parte 4 (Mosaico & Costura):** Inferência em janelas deslizantes (tiling) e algoritmo autoral de fusão de instâncias na faixa de sobreposição (*Instance Stitching* via Union-Find).
+6. **Parte 5 (Galeria de Falhas & Diagnósticos):** Diagnóstico formal dos 5 modos críticos de falha, análise teórica de campo receptivo ($RF_{\text{encoder}} = 899\text{ px} \gg d_{\text{médio}} = 21.4\text{ px}$) em 29.461 núcleos e correção adaptativa via consolidação morfológica de sementes (+17.78 p.p. mAP, erro de contagem zerado).
 
 ### Resumo Comparativo de Desempenho (Validação DSB2018, Hungarian Matching)
 
@@ -33,6 +34,8 @@ Este projeto implementa e avalia métodos autorais de segmentação de instânci
 | **Parte 3: Eixo 2 (Perdas)** | Focal Loss ($\gamma = 5$) | 0.3636 ± 0.0059 | 0.6329 ± 0.0188 | 10.32 ± 0.96 | 0.7533 ± 0.0060 |
 | **Parte 4: Mosaico 2x2 (310 GT)** | Tiling Ingênuo (Center-Crop) | 0.3898 | 0.6744 | +33 núcleos | — |
 | **Parte 4: Mosaico 2x2 (310 GT)** | Costura com Fusão (Union-Find, $\tau=0.20$) | **0.4413 (+5.15 pp)** | **0.7479 (+7.35 pp)** | **+4 núcleos** | — |
+| **Parte 5: Células Gigantes (19 GT)** | Watershed Padrão (Hiper-fragmentação) | 0.0740 | 0.1250 | +52 núcleos | — |
+| **Parte 5: Células Gigantes (19 GT)** | Watershed Adaptativo (Consolidação Sementes) | **0.2518 (+17.78 pp)** | **0.3571 (+23.21 pp)** | **0 núcleos (exato!)** | — |
 
 ```bash
 dl-pa1-2026
@@ -50,13 +53,14 @@ dl-pa1-2026
 ├── LICENSE
 ├── notebooks/
 │   ├── exploratory.ipynb  # Prototipação e inspeção de dados
-│   └── inferencia.ipynb   # Vitrine técnica completa (Partes 0 a 4)
+│   └── inferencia.ipynb   # Vitrine técnica completa (Partes 0 a 5)
 ├── PA1.pdf
 ├── README.md
 ├── requirements.txt
 ├── scripts/               # Scripts de automação e reprodução
 │   ├── run_eixo1.sh       # Execução da grade do Eixo 1
 │   ├── run_eixo2.sh       # Execução da grade do Eixo 2
+│   ├── run_failure_gallery.py # Rastreio de falhas, campo receptivo e correção adaptativa
 │   ├── run_mosaic_demo.py # Demonstração integrada de tiling e fusão
 │   ├── summarize_eixo1.py # Consolidação de métricas do Eixo 1
 │   └── summarize_eixo2.py # Consolidação de métricas do Eixo 2

@@ -1,0 +1,124 @@
+{
+  "dataset": "dsb2018",
+  "split": "val",
+  "checkpoint": "checkpoints/part2_watershed.pth",
+  "selected_failure_cases": [
+    {
+      "case_number": 1,
+      "index": 34,
+      "image_id": "8d05fb18ee0cda107d56735cafa6197a31884e0a5092dc6d41760fb92ae23ab4",
+      "name": "Caso 1 — Aliasing Espacial por Downsampling Severo (1024x1024 -> 256x256)",
+      "modality": "Lâmina Brightfield (Alta Resolução Original)",
+      "diagnostic": "Núcleos pequenos com fronteiras sub-amostradas (<0.25 px) colapsam em sementes fundidas, causando sub-segmentação extrema (N_pred=35 vs N_gt=94).",
+      "mAP": 0.06294156091856826,
+      "ap50": 0.22857142857142856,
+      "ap75": 0.032,
+      "n_pred": 35,
+      "n_gt": 94,
+      "count_error": 59
+    },
+    {
+      "case_number": 2,
+      "index": 56,
+      "image_id": "ebc18868864ad075548cc1784f4f9a237bb98335f9645ee727dac8332a3e3716",
+      "name": "Caso 2 — Hiper-Fragmentação Interna de Células Gigantes (Texture Split)",
+      "modality": "Histopatologia H&E Púrpura",
+      "diagnostic": "Núcleos gigantes (>3000 px) com textura interna heterogênea geram múltiplos marcadores desconexos dentro do mesmo núcleo, retalhando células em múltiplos pedaços (N_pred=71 vs N_gt=19).",
+      "mAP": 0.07403048660135832,
+      "ap50": 0.125,
+      "ap75": 0.07142857142857142,
+      "n_pred": 71,
+      "n_gt": 19,
+      "count_error": 52
+    },
+    {
+      "case_number": 3,
+      "index": 35,
+      "image_id": "8f94a80b95a881d0efdec36affc915dca9609f4cba8134c4a91b219d418778aa",
+      "name": "Caso 3 — Esmagamento de Gradiente em Fundo Esmaecido (Vanishing Edges)",
+      "modality": "Microscopia Óptica de Baixo Contraste",
+      "diagnostic": "Contraste óptico insuficiente impede a ativação de cristas de fronteira e interior celular (P(int) < 0.50), omitindo mais de 70% dos núcleos (N_pred=23 vs N_gt=75).",
+      "mAP": 0.07622793145770049,
+      "ap50": 0.18072289156626506,
+      "ap75": 0.053763440860215055,
+      "n_pred": 23,
+      "n_gt": 75,
+      "count_error": 52
+    },
+    {
+      "case_number": 4,
+      "index": 39,
+      "image_id": "abd8dde78f8d37b68b28da67459371ed65f0a575523e94bc4ecbc88e6fedf0d0",
+      "name": "Caso 4 — Falsos Positivos por Detritos e Textura Estromal",
+      "modality": "Histopatologia H&E de Tecido Frouxo",
+      "diagnostic": "Fibras de estroma extracelular e agregados de detritos exibem afinidade tintorial basofílica, ativando falsos centros de interior em regiões anucleadas (N_pred=30 vs N_gt=14).",
+      "mAP": 0.06816064004857031,
+      "ap50": 0.15789473684210525,
+      "ap75": 0.047619047619047616,
+      "n_pred": 30,
+      "n_gt": 14,
+      "count_error": 16
+    },
+    {
+      "case_number": 5,
+      "index": 3,
+      "image_id": "0ea221716cf13710214dcd331a61cea48308c3940df1d28cfc7fd817c83714e1",
+      "name": "Caso 5 — Limite de Densidade em Monocamada Confluente (369 Núcleos)",
+      "modality": "Fluorescência Densa Multicelular",
+      "diagnostic": "Em contato intercelular em 100% do perímetro, a erosão de 1 pixel extingue por completo o interior dos menores núcleos espremidos no centro do aglomerado (subcontagem residual de 47 células).",
+      "mAP": 0.3374349491595699,
+      "ap50": 0.657074340527578,
+      "ap75": 0.31368821292775667,
+      "n_pred": 322,
+      "n_gt": 369,
+      "count_error": 47
+    }
+  ],
+  "morphological_distribution": {
+    "total_nuclei": 29461,
+    "total_images": 670,
+    "diameter_mean": 21.4,
+    "diameter_std": 11.95,
+    "diameter_median": 19.71,
+    "diameter_p25": 12.26,
+    "diameter_p75": 27.03,
+    "diameter_p95": 48.43,
+    "diameter_max": 118.54,
+    "diameter_min": 5.17
+  },
+  "receptive_field": {
+    "encoder_resnet34_os32": 899,
+    "aspp_branch_os16": {
+      "conv_1x1": 931,
+      "conv_3x3_rate_6": 1123,
+      "conv_3x3_rate_12": 1315,
+      "conv_3x3_rate_18": 1507
+    },
+    "ratio_rf_vs_mean_diameter": 42.0,
+    "ratio_rf_vs_max_diameter": 7.6
+  },
+  "correction_experiment": {
+    "case_evaluated": "Caso 2 (idx=56, ebc18868864ad075)",
+    "technique": "Watershed Adaptativo com Consolidação Morfológica de Sementes (seed_closing_radius=4, min_area=60, interior_threshold=0.40)",
+    "before": {
+      "mAP": 0.07403048660135832,
+      "ap50": 0.125,
+      "ap75": 0.07142857142857142,
+      "n_pred": 71,
+      "n_gt": 19,
+      "count_error": 52
+    },
+    "after": {
+      "mAP": 0.2518123090912301,
+      "ap50": 0.35714285714285715,
+      "ap75": 0.3103448275862069,
+      "n_pred": 19,
+      "n_gt": 19,
+      "count_error": 0
+    },
+    "relative_gain_mAP_percent": 240.15,
+    "absolute_gain_mAP": 0.1778,
+    "absolute_gain_ap50": 0.2321,
+    "count_error_reduction": 52
+  }
+}
