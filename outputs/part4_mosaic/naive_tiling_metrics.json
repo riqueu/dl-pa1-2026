@@ -1,0 +1,42 @@
+{
+  "mosaic_grid_sample": {
+    "image_ids": [
+      "ed8c31b001a0c23c33402f94a5ee6b0209e0c6419eb52d5d02255513e3a672fc",
+      "64eeef16fdc4e26523d27bfa71a1d38d2cb2e4fa116c0d0ea56b1322f806f0b9",
+      "e50ac10d1dce6496d092d966784ed3795969128ca0bc58199a36d558ed529203",
+      "243443ae303cc09cfbea85bfd22b0c4f026342f3dfc3aa1076f27867910d025b"
+    ],
+    "total_gt_nuclei": 310,
+    "tile_size": 256,
+    "stride": 128,
+    "num_tiles": 9,
+    "center_crop_mode": {
+      "n_pred": 343,
+      "mAP": 0.38977787653361734,
+      "ap50": 0.6743589743589744,
+      "ap75": 0.39828693790149894,
+      "count_error": 33,
+      "boundary_nuclei": 37,
+      "split_ratio": 0.11935483870967742,
+      "split_nuclei_count": 10
+    },
+    "direct_stamp_mode": {
+      "n_pred": 408,
+      "mAP": 0.35486739233098447,
+      "ap50": 0.5920177383592018,
+      "ap75": 0.38878143133462284,
+      "count_error": 98
+    }
+  },
+  "continuous_large_image": {
+    "image_id": "0ea221716cf13710214dcd331a61cea48308c3940df1d28cfc7fd817c83714e1",
+    "n_gt": 292,
+    "n_pred_naive": 387,
+    "mAP": 0.20788361850428005,
+    "ap50": 0.44776119402985076,
+    "ap75": 0.18706293706293706,
+    "count_error": 95,
+    "boundary_nuclei": 64,
+    "split_nuclei_count": 35
+  }
+}
