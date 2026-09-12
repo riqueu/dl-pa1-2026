@@ -18,7 +18,7 @@ A dupla selecionou formalmente:
 * **Configurações a comparar (todas com 15 épocas):**
   1. `unet_skips`: U-Net padrão com concatenação de skip connections (resolução preservada estágio a estágio).
   2. `unet_noskips`: U-Net sem skip connections (`--no_skips`), onde o decoder opera puramente sobre o gargalo.
-  3. `deeplab_aspp`: Módulo Atrous Spatial Pyramid Pooling (ASPP) no gargalo com taxas de dilatação $r \in \{1, 6, 12, 18\}$ e pooling global, projetando contexto multi-escala sem depender de skips rasos.
+  3. `deeplab_aspp`: ResNet34 com *output stride* 16, `layer4` dilatado, ASPP com ramo $1\times1$, taxas $r \in \{6, 12, 18\}$ e pooling global, sem depender de skips rasos.
 * **Seeds por configuração:** `seed=42` e `seed=123`.
 * **Total de execuções:** $3 \text{ configurações} \times 2 \text{ seeds} = 6 \text{ treinos}$.
 * **Sinergia:** O módulo ASPP e o cálculo do seu campo receptivo adiantam diretamente as respostas obrigatórias da **Parte 5** (Galeria de Falhas) e da **Parte 6** (Invariância a Escala).
@@ -104,9 +104,9 @@ A divisão mantém isolamento absoluto de arquivos para trabalho simultâneo em 
 ### Tabela 1: Eixo 1 — Recuperação de Resolução
 | Arquitetura | Mecanismo | Parâmetros | mAP@[.50:.95] (Seed 42) | mAP@[.50:.95] (Seed 123) | Média $\pm$ Desvio | Erro Médio Contagem |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| U-Net Padrão | Skip Connections | ~24.4M | — | — | **0.XXX $\pm$ 0.0YY** | — |
-| U-Net Sem Skips | Gargalo Direto | ~21.2M | — | — | **0.XXX $\pm$ 0.0YY** | — |
-| DeepLabv3 | ASPP ($r=1,6,12,18$) | ~26.8M | — | — | **0.XXX $\pm$ 0.0YY** | — |
+| U-Net Padrão | Skip Connections | 25.834.003 | — | — | **0.XXX $\pm$ 0.0YY** | — |
+| U-Net Sem Skips | Gargalo Direto | 25.041.427 | — | — | **0.XXX $\pm$ 0.0YY** | — |
+| DeepLab/ASPP | Atrous + ASPP ($r=1,6,12,18$) | 25.711.555 | — | — | **0.XXX $\pm$ 0.0YY** | — |
 
 ### Tabela 2: Eixo 2 — Função de Perda
 | Perda | Parâmetro $\gamma$ | Pesos de Classe | mAP (Seed 42) | mAP (Seed 123) | Média $\pm$ Desvio | Erro Médio Contagem |
@@ -126,3 +126,24 @@ A divisão mantém isolamento absoluto de arquivos para trabalho simultâneo em 
 3. O Membro B dispara os scripts de treinamento da grade de $\gamma$.
 4. Avaliação e merge na `main` com consolidação no `notebooks/inferencia.ipynb`.
 
+### Estado da implementação do Eixo 1
+
+Implementado na branch `feature/part3-eixo1-resolution`:
+
+- `ResNetEncoder` com *output stride* 16 por remoção do stride e dilatação 2 no `layer4`;
+- ASPP e cabeça DeepLab autorais em `src/models.py`;
+- argumentos `--decoder_type`, `--output_stride` e `--aspp_rates` no treino;
+- persistência e reconstrução estrita da arquitetura nos checkpoints;
+- cálculo teórico do campo receptivo em `src/utils.py`;
+- testes estruturais em `tests/test_models.py`;
+- grade reproduzível em `scripts/run_eixo1.sh` e consolidação em `scripts/summarize_eixo1.py`.
+
+Os seis treinos devem usar os mesmos pesos de classe explícitos. Depois de os
+pesos serem calculados uma única vez no split de treino, a grade é iniciada por:
+
+```bash
+PA1_CLASS_WEIGHTS="w_fundo,w_interior,w_fronteira" bash scripts/run_eixo1.sh
+```
+
+O script recusa sobrescrever qualquer execução existente e gera
+`outputs/part3_eixo1/summary.json` com média e desvio-padrão amostral das seeds.

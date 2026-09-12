@@ -65,6 +65,24 @@ def _load_resnet(name: str, pretrained: bool) -> nn.Module:
         return factory(pretrained=pretrained)
 
 
+def _make_layer4_atrous(layer4: nn.Sequential) -> None:
+    """Converte o último estágio de uma ResNet BasicBlock para output stride 16.
+
+    A alteração preserva os shapes dos pesos pré-treinados: apenas stride,
+    padding e dilation mudam. Isso permite comparar U-Net e DeepLab com o mesmo
+    encoder ResNet34 e a mesma inicialização ImageNet.
+    """
+    first_block = layer4[0]
+    first_block.conv1.stride = (1, 1)
+    if first_block.downsample is not None:
+        first_block.downsample[0].stride = (1, 1)
+
+    for block in layer4:
+        for conv in (block.conv1, block.conv2):
+            conv.dilation = (2, 2)
+            conv.padding = (2, 2)
+
+
 class ResNetEncoder(nn.Module):
     """Encoder ResNet que expõe os 5 níveis de resolução usados pelas skip connections.
 
@@ -76,18 +94,31 @@ class ResNetEncoder(nn.Module):
     | 1     | layer1 (após maxpool)   | H/4       | 64               |
     | 2     | layer2                  | H/8       | 128              |
     | 3     | layer3                  | H/16      | 256              |
-    | 4     | layer4 (gargalo)        | H/32      | 512              |
+    | 4     | layer4 (gargalo)        | H/32 ou H/16 | 512            |
     """
 
-    def __init__(self, name: str = "resnet34", pretrained: bool = True) -> None:
+    def __init__(
+        self,
+        name: str = "resnet34",
+        pretrained: bool = True,
+        output_stride: int = 32,
+    ) -> None:
         """Inicializa o encoder.
 
         Args:
             name: Arquitetura base ('resnet18' ou 'resnet34').
             pretrained: Se True, aproveita os pesos ImageNet.
+            output_stride: Redução espacial total do encoder. Em 16, o stride do
+                ``layer4`` é removido e suas convoluções 3x3 usam dilatação 2.
         """
         super().__init__()
+        if output_stride not in (16, 32):
+            raise ValueError("output_stride deve ser 16 ou 32.")
+
         net = _load_resnet(name, pretrained)
+
+        if output_stride == 16:
+            _make_layer4_atrous(net.layer4)
 
         self.stem = nn.Sequential(net.conv1, net.bn1, net.relu)
         self.pool = net.maxpool
@@ -97,6 +128,7 @@ class ResNetEncoder(nn.Module):
         self.layer4 = net.layer4
 
         self.out_channels: Tuple[int, ...] = _ENCODER_CHANNELS[name]
+        self.output_stride = output_stride
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         """Extrai as features multi-escala.
@@ -321,13 +353,138 @@ class UNet(nn.Module):
         return self.head(out)
 
 
+class ASPPConv(nn.Sequential):
+    """Ramo convolucional do ASPP com normalização e ativação."""
+
+    def __init__(self, in_channels: int, out_channels: int, dilation: int) -> None:
+        kernel_size = 1 if dilation == 1 else 3
+        padding = 0 if dilation == 1 else dilation
+        super().__init__(
+            nn.Conv2d(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=padding,
+                dilation=dilation,
+                bias=False,
+            ),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+
+
+class ASPPPooling(nn.Module):
+    """Ramo de contexto global do ASPP."""
+
+    def __init__(self, in_channels: int, out_channels: int) -> None:
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        # Sem BatchNorm após o pooling: um lote unitário produziria somente um
+        # valor por canal e tornaria a estatística de treino indefinida.
+        self.project = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        size = x.shape[-2:]
+        out = self.project(self.pool(x))
+        return F.interpolate(out, size=size, mode="bilinear", align_corners=False)
+
+
+class ASPP(nn.Module):
+    """Atrous Spatial Pyramid Pooling autoral com cinco escalas de contexto."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int = 256,
+        rates: Sequence[int] = (6, 12, 18),
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        if len(rates) != 3 or any(rate <= 0 for rate in rates):
+            raise ValueError("rates deve conter exatamente três inteiros positivos.")
+
+        self.rates = tuple(int(rate) for rate in rates)
+        self.branches = nn.ModuleList(
+            [ASPPConv(in_channels, out_channels, dilation=1)]
+            + [ASPPConv(in_channels, out_channels, dilation=rate) for rate in self.rates]
+            + [ASPPPooling(in_channels, out_channels)]
+        )
+        self.project = nn.Sequential(
+            nn.Conv2d(5 * out_channels, out_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.project(torch.cat([branch(x) for branch in self.branches], dim=1))
+
+
+class DeepLabASPP(nn.Module):
+    """DeepLab autoral: ResNet dilatada, ASPP e cabeça densa sem skips rasos."""
+
+    def __init__(
+        self,
+        encoder: str = "resnet34",
+        out_channels: int = 1,
+        pretrained: bool = True,
+        output_stride: int = 16,
+        aspp_rates: Sequence[int] = (6, 12, 18),
+        aspp_channels: int = 256,
+    ) -> None:
+        super().__init__()
+        self.encoder_name = encoder
+        self.out_channels = out_channels
+        self.output_stride = output_stride
+        self.aspp_rates = tuple(int(rate) for rate in aspp_rates)
+
+        self.encoder = ResNetEncoder(
+            encoder,
+            pretrained=pretrained,
+            output_stride=output_stride,
+        )
+        bottleneck_channels = self.encoder.out_channels[-1]
+        self.aspp = ASPP(
+            bottleneck_channels,
+            out_channels=aspp_channels,
+            rates=self.aspp_rates,
+        )
+        self.head = nn.Sequential(
+            nn.Conv2d(aspp_channels, 128, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+            nn.Conv2d(128, out_channels, kernel_size=1),
+        )
+
+        self.register_buffer(
+            "norm_mean", torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1), persistent=False
+        )
+        self.register_buffer(
+            "norm_std", torch.tensor(IMAGENET_STD).view(1, 3, 1, 1), persistent=False
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        input_size = x.shape[-2:]
+        x = (x - self.norm_mean) / self.norm_std
+        bottleneck = self.encoder(x)[-1]
+        logits = self.head(self.aspp(bottleneck))
+        return F.interpolate(logits, size=input_size, mode="bilinear", align_corners=False)
+
+
 def build_model(
     encoder: str = "resnet34",
     out_channels: int = 1,
     up_mode: str = "transpose",
     use_skips: bool = True,
     pretrained: bool = True,
-) -> UNet:
+    decoder_type: str = "unet",
+    output_stride: Optional[int] = None,
+    aspp_rates: Sequence[int] = (6, 12, 18),
+) -> nn.Module:
     """Constrói o modelo do projeto.
 
     Chamado sem argumentos por `evaluate.py` e por `notebooks/inferencia.ipynb`,
@@ -340,17 +497,35 @@ def build_model(
         up_mode: Mecanismo de subida do decoder.
         use_skips: Liga ou desliga as skip connections.
         pretrained: Inicialização com pesos ImageNet.
+        decoder_type: ``unet`` preserva a baseline; ``aspp`` seleciona DeepLab.
+        output_stride: Redução espacial do encoder. O default é 32 para U-Net
+            e 16 para ASPP.
+        aspp_rates: Taxas dos três ramos 3x3 do ASPP.
 
     Returns:
-        Instância de UNet pronta para treino ou inferência.
+        Modelo pronto para treino ou inferência.
     """
-    return UNet(
-        encoder=encoder,
-        out_channels=out_channels,
-        up_mode=up_mode,
-        use_skips=use_skips,
-        pretrained=pretrained,
-    )
+    if decoder_type == "unet":
+        resolved_stride = 32 if output_stride is None else output_stride
+        if resolved_stride != 32:
+            raise ValueError("A U-Net atual requer output_stride=32.")
+        return UNet(
+            encoder=encoder,
+            out_channels=out_channels,
+            up_mode=up_mode,
+            use_skips=use_skips,
+            pretrained=pretrained,
+        )
+    if decoder_type == "aspp":
+        resolved_stride = 16 if output_stride is None else output_stride
+        return DeepLabASPP(
+            encoder=encoder,
+            out_channels=out_channels,
+            pretrained=pretrained,
+            output_stride=resolved_stride,
+            aspp_rates=aspp_rates,
+        )
+    raise ValueError("decoder_type deve ser 'unet' ou 'aspp'.")
 
 
 def count_parameters(model: nn.Module, trainable_only: bool = True) -> int:
@@ -385,3 +560,14 @@ if __name__ == "__main__":
     loss = model(torch.rand(2, 3, 128, 128)).mean()
     loss.backward()
     print("backward ok")
+
+    deeplab = build_model(
+        out_channels=3,
+        decoder_type="aspp",
+        pretrained=False,
+    )
+    for h, w in [(128, 128), (200, 216)]:
+        x = torch.rand(2, 3, h, w)
+        y = deeplab(x)
+        assert y.shape == (2, 3, h, w)
+        print(f"DeepLab: entrada {tuple(x.shape)} -> saída {tuple(y.shape)}  ok")

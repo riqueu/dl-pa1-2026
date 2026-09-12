@@ -345,6 +345,113 @@ def compute_nuclei_size_statistics(
     }
 
 
+def compute_receptive_field_trace(
+    layer_specs: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Calcula campo receptivo e salto teóricos para uma sequência de camadas.
+
+    Cada especificação deve conter ``name`` e ``kernel`` e pode informar
+    ``stride`` e ``dilation`` (ambos assumem 1). O cálculo acompanha o caminho
+    convolucional principal; conexões residuais não aumentam o campo receptivo.
+
+    Args:
+        layer_specs: Descrição ordenada das operações espaciais.
+
+    Returns:
+        Uma linha por operação com kernel efetivo, salto e campo receptivo.
+    """
+    receptive_field = 1
+    jump = 1
+    trace: List[Dict[str, Any]] = []
+
+    for index, spec in enumerate(layer_specs):
+        kernel = int(spec["kernel"])
+        stride = int(spec.get("stride", 1))
+        dilation = int(spec.get("dilation", 1))
+        if kernel <= 0 or stride <= 0 or dilation <= 0:
+            raise ValueError("kernel, stride e dilation devem ser positivos.")
+
+        effective_kernel = kernel + (kernel - 1) * (dilation - 1)
+        receptive_field += (effective_kernel - 1) * jump
+        jump *= stride
+        trace.append(
+            {
+                "index": index,
+                "name": str(spec.get("name", f"layer_{index}")),
+                "kernel": kernel,
+                "stride": stride,
+                "dilation": dilation,
+                "effective_kernel": effective_kernel,
+                "jump": jump,
+                "receptive_field": receptive_field,
+            }
+        )
+
+    return trace
+
+
+def resnet34_receptive_field_summary(
+    output_stride: int = 32,
+    aspp_rates: Sequence[int] = (6, 12, 18),
+) -> Dict[str, Any]:
+    """Resume o campo receptivo do ResNet34 e dos ramos ASPP da Parte 3.
+
+    O caso ``output_stride=16`` espelha exatamente ``ResNetEncoder``: remove o
+    stride do ``layer4`` e aplica dilatação 2 às seis convoluções desse estágio.
+    O ramo de pooling global é registrado como contexto da imagem inteira, sem
+    atribuir a ele um tamanho finito independente da entrada.
+    """
+    if output_stride not in (16, 32):
+        raise ValueError("output_stride deve ser 16 ou 32.")
+    if len(aspp_rates) != 3 or any(int(rate) <= 0 for rate in aspp_rates):
+        raise ValueError("aspp_rates deve conter três inteiros positivos.")
+
+    specs: List[Dict[str, Any]] = [
+        {"name": "stem.conv1", "kernel": 7, "stride": 2},
+        {"name": "stem.maxpool", "kernel": 3, "stride": 2},
+    ]
+    blocks_per_stage = (3, 4, 6, 3)
+    for stage, n_blocks in enumerate(blocks_per_stage, start=1):
+        for block in range(n_blocks):
+            stride = 2 if stage > 1 and block == 0 else 1
+            dilation = 1
+            if stage == 4 and output_stride == 16:
+                stride = 1
+                dilation = 2
+            specs.extend(
+                [
+                    {
+                        "name": f"layer{stage}.{block}.conv1",
+                        "kernel": 3,
+                        "stride": stride,
+                        "dilation": dilation,
+                    },
+                    {
+                        "name": f"layer{stage}.{block}.conv2",
+                        "kernel": 3,
+                        "stride": 1,
+                        "dilation": dilation,
+                    },
+                ]
+            )
+
+    trace = compute_receptive_field_trace(specs)
+    encoder_rf = trace[-1]["receptive_field"]
+    encoder_jump = trace[-1]["jump"]
+    branch_rf = {"conv_1x1": encoder_rf}
+    for rate in aspp_rates:
+        branch_rf[f"conv_3x3_rate_{int(rate)}"] = encoder_rf + 2 * int(rate) * encoder_jump
+
+    return {
+        "output_stride": output_stride,
+        "encoder_receptive_field": encoder_rf,
+        "encoder_jump": encoder_jump,
+        "aspp_branch_receptive_fields": branch_rf,
+        "global_pooling": "imagem inteira",
+        "trace": trace,
+    }
+
+
 def plot_dataset_statistics(
     stats: Dict[str, np.ndarray],
     save_path: Optional[str] = None,

@@ -7,7 +7,7 @@ Este script atende ao requisito do README do PA1 ('um comando que avalia'):
   exigido no Item 5 da Parte 1.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import argparse
 import json
 import os
@@ -102,6 +102,12 @@ def parse_args() -> argparse.Namespace:
         help="Tamanho do lote na avaliação",
     )
     parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=2,
+        help="Processos auxiliares do DataLoader; use 0 em ambientes restritos.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         default="outputs/eval_results",
@@ -165,6 +171,9 @@ def load_model(checkpoint_path: str, device: torch.device) -> Tuple[torch.nn.Mod
     encoder = model_args.get("encoder", "resnet34")
     up_mode = model_args.get("up_mode", "transpose")
     use_skips = model_args.get("use_skips", True)
+    decoder_type = model_args.get("decoder_type", "unet")
+    output_stride = model_args.get("output_stride")
+    aspp_rates = model_args.get("aspp_rates", [6, 12, 18])
 
     model = build_model(
         encoder=encoder,
@@ -172,6 +181,9 @@ def load_model(checkpoint_path: str, device: torch.device) -> Tuple[torch.nn.Mod
         up_mode=up_mode,
         use_skips=use_skips,
         pretrained=False,
+        decoder_type=decoder_type,
+        output_stride=output_stride,
+        aspp_rates=aspp_rates,
     )
     model.load_state_dict(state_dict)
     model.to(device)
@@ -216,7 +228,12 @@ def main() -> None:
     else:
         dataset = SyntheticDataset(num_samples=100, seed=123, three_class=(out_channels == 3))
 
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
+    loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+    )
     print(f"Total de imagens a avaliar: {len(dataset)}")
     print(f"Decodificação: {'Watershed Multiclasse (Trilha A)' if out_channels == 3 else 'Componentes Conexos Ingênuos (Parte 1)'}")
 
