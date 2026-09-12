@@ -195,6 +195,7 @@ def watershed_instance_segmentation(
     foreground_threshold: float = 0.50,
     min_area: int = 10,
     connectivity: int = 1,
+    seed_closing_radius: int = 0,
 ) -> np.ndarray:
     """Decodifica fundo/interior/fronteira em instâncias via watershed.
 
@@ -209,6 +210,9 @@ def watershed_instance_segmentation(
         foreground_threshold: Limiar de ``P(interior) + P(fronteira)``.
         min_area: Remove instâncias previstas com menos pixels. Zero desliga.
         connectivity: 1 para vizinhança de 4; 2 para vizinhança de 8.
+        seed_closing_radius: Número de iterações de fechamento morfológico aplicado
+            às sementes de interior antes da rotulagem de marcadores. Útil para
+            consolidar marcadores fragmentados em células grandes com variações de cromatina (Parte 5).
 
     Returns:
         Array NumPy int64 ``(H, W)``, com 0 = fundo e IDs consecutivos.
@@ -221,6 +225,8 @@ def watershed_instance_segmentation(
         raise ValueError("min_area deve ser maior ou igual a zero.")
     if connectivity not in (1, 2):
         raise ValueError("connectivity deve ser 1 (4-vizinhos) ou 2 (8-vizinhos).")
+    if seed_closing_radius < 0:
+        raise ValueError("seed_closing_radius deve ser maior ou igual a zero.")
 
     probabilities = _to_numpy_three_channels(prob)
     p_interior = probabilities[1]
@@ -228,6 +234,12 @@ def watershed_instance_segmentation(
 
     foreground = (p_interior + p_boundary) >= foreground_threshold
     seeds = (p_interior >= interior_threshold) & foreground
+
+    if seed_closing_radius > 0:
+        struct_close = ndimage.generate_binary_structure(2, 2)
+        seeds = ndimage.binary_closing(seeds, structure=struct_close, iterations=seed_closing_radius)
+        seeds = seeds & foreground
+
     structure = ndimage.generate_binary_structure(2, connectivity)
     markers, n_markers = ndimage.label(seeds, structure=structure)
 
@@ -258,6 +270,7 @@ def watershed_instance_segmentation_batch(
     foreground_threshold: float = 0.50,
     min_area: int = 10,
     connectivity: int = 1,
+    seed_closing_radius: int = 0,
 ) -> List[np.ndarray]:
     """Aplica a decodificação watershed a um lote ``(B, 3, H, W)``."""
     if isinstance(prob, torch.Tensor):
@@ -275,6 +288,7 @@ def watershed_instance_segmentation_batch(
             foreground_threshold=foreground_threshold,
             min_area=min_area,
             connectivity=connectivity,
+            seed_closing_radius=seed_closing_radius,
         )
         for item in batch
     ]
