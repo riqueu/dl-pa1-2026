@@ -50,3 +50,10 @@ Documentação sintética do uso de ferramentas de IA no PA1, servindo como indi
 * **Contexto:** Corrigir a duplicação e fragmentação de núcleos quando cada tile sobreposto é decodificado independentemente por watershed.
 * **Uso da IA:** Apoio no desenho e teste de uma costura baseada em matching local por IoU, Union-Find e arbitragem espacial dos pixels conflitantes.
 * **Decisão Técnica:** Cada par `(tile, id_local)` recebe uma identidade provisória; correspondências um-para-um na faixa de sobreposição são unidas transitivamente e os IDs globais são renumerados. A versão sem fusão usa a mesma regra de composição para permitir uma comparação controlada antes/depois.
+
+---
+
+## Episodio 8: Teste de Estresse por Mudanca de Escala
+* **Contexto:** Comparar a robustez da U-Net com skips e do DeepLab/ASPP autoral em 0,5x, 1,0x e 2,0x sem confundir desempenho absoluto, sensibilidade arquitetural e parametros do Watershed medidos em pixels.
+* **Uso da IA:** Apoio na revisao do protocolo, identificacao dos fatores de confusao, implementacao das primitivas testaveis e automacao das metricas e figuras reprodutiveis.
+* **Decisao Tecnica:** Definir 256x256 como escala 1,0x, aplicar antialiasing na imagem e vizinho mais proximo apenas aos IDs. O resultado principal congela o Watershed; um controle reutiliza as mesmas probabilidades com `min_area` proporcional a $s^2$. A resiliencia e comparada por queda absoluta e retencao relativa do mAP.
