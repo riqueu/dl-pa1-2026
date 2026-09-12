@@ -43,3 +43,10 @@ Documentação sintética do uso de ferramentas de IA no PA1, servindo como indi
 * **Contexto:** Montagem de imagens grandes ($512 \times 512$), inferência em janelas deslizantes sobrepostas ($256 \times 256$, stride 128) e diagnóstico da quebra de instâncias na fronteira sem fusão.
 * **Uso da IA:** Auxílio na implementação do módulo `src/mosaic.py`, automação do pipeline de teste em grade e lâminas contínuas (`scripts/run_mosaic_demo.py`), diagnóstico geométrico de fatiamento de núcleos e geração dos plots com zoom.
 * **Decisão Técnica:** Desacoplamento estrito entre geração de tiles/predições e o algoritmo de costura do Membro B (`src/stitching.py`), com quantificação do colapso de mAP (queda de $\sim 0.5157$ para $0.3898$ em grade e $0.2079$ em lâmina contínua) e inflação de contagem por fragmentação.
+
+---
+
+## Episódio 7: Fusão de Instâncias em Inferência por Tiles
+* **Contexto:** Corrigir a duplicação e fragmentação de núcleos quando cada tile sobreposto é decodificado independentemente por watershed.
+* **Uso da IA:** Apoio no desenho e teste de uma costura baseada em matching local por IoU, Union-Find e arbitragem espacial dos pixels conflitantes.
+* **Decisão Técnica:** Cada par `(tile, id_local)` recebe uma identidade provisória; correspondências um-para-um na faixa de sobreposição são unidas transitivamente e os IDs globais são renumerados. A versão sem fusão usa a mesma regra de composição para permitir uma comparação controlada antes/depois.

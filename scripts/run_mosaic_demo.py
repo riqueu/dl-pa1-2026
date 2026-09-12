@@ -1,4 +1,4 @@
-"""Script de execução e diagnóstico da Parte 4 (Membro A: Henrique).
+"""Script integrado de inferência em mosaico e fusão da Parte 4.
 
 Demonstra:
 1. Montagem do mosaico grande (512x512) com GT contínuo a partir de imagens do DSB2018.
@@ -6,7 +6,7 @@ Demonstra:
 3. Avaliação quantitativa com mAP@[.50:.95], AP@0.50, AP@0.75 e erro de contagem.
 4. Identificação geométrica dos núcleos que cruzam as bordas dos tiles e foram fatiados.
 5. Geração de gráficos diagnósticos com zoom nos núcleos fragmentados.
-6. Persistência dos dados intermediários para consumo do algoritmo de costura do Membro B.
+6. Fusão por IoU no overlap e avaliação formal antes/depois da correção.
 """
 
 from typing import Dict, Any, List
@@ -17,6 +17,11 @@ import sys
 import numpy as np
 import torch
 
+# Permite executar ``python scripts/run_mosaic_demo.py`` a partir da raiz.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
 from src.models import build_model
 from src.metrics import evaluate_instances
 from src.mosaic import (
@@ -26,6 +31,7 @@ from src.mosaic import (
     detect_split_nuclei,
     plot_tiling_failure_analysis,
 )
+from src.stitching import plot_stitching_comparison, stitch_tiles_with_fusion
 
 
 def load_model(checkpoint_path: str, device: torch.device) -> torch.nn.Module:
@@ -41,6 +47,9 @@ def load_model(checkpoint_path: str, device: torch.device) -> torch.nn.Module:
     encoder = model_args.get("encoder", "resnet34")
     up_mode = model_args.get("up_mode", "transpose")
     use_skips = model_args.get("use_skips", True)
+    decoder_type = model_args.get("decoder_type", "unet")
+    output_stride = model_args.get("output_stride")
+    aspp_rates = model_args.get("aspp_rates", [6, 12, 18])
 
     model = build_model(
         encoder=encoder,
@@ -48,6 +57,9 @@ def load_model(checkpoint_path: str, device: torch.device) -> torch.nn.Module:
         up_mode=up_mode,
         use_skips=use_skips,
         pretrained=False,
+        decoder_type=decoder_type,
+        output_stride=output_stride,
+        aspp_rates=aspp_rates,
     )
     model.load_state_dict(state_dict)
     model.to(device).eval()
@@ -56,11 +68,17 @@ def load_model(checkpoint_path: str, device: torch.device) -> torch.nn.Module:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Demonstração do Tiling Ingênuo (Parte 4)")
+    parser = argparse.ArgumentParser(description="Inferência em mosaico antes/depois da fusão (Parte 4)")
     parser.add_argument("--checkpoint", type=str, default="checkpoints/part2_watershed.pth", help="Caminho do checkpoint")
     parser.add_argument("--output_dir", type=str, default="outputs/part4_mosaic", help="Diretório de saída")
     parser.add_argument("--tile_size", type=int, default=256, help="Tamanho do patch quadrado")
     parser.add_argument("--stride", type=int, default=128, help="Passo da janela deslizante (128 = 50%% overlap)")
+    parser.add_argument(
+        "--iou_overlap_threshold",
+        type=float,
+        default=0.20,
+        help="IoU mínimo na faixa de sobreposição para fundir duas instâncias.",
+    )
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -126,7 +144,23 @@ def main() -> None:
     split_count = sum(1 for d in split_info_crop["split_gt_details"] if d.get("num_fragments", 0) >= 2)
     print(f"Núcleos efetivamente fatiados em múltiplos IDs: {split_count}")
 
-    # 4. Execução do Tiling Ingênuo - Modo Direct-Stamp
+    # 4. Correção proposta: fusão dos IDs locais na faixa de sobreposição.
+    stitched_grid = stitch_tiles_with_fusion(
+        tiles_preds=naive_res_crop["tiles_preds"],
+        tile_boxes=naive_res_crop["tile_boxes"],
+        full_shape=mosaic_grid_gt.shape,
+        iou_overlap_threshold=args.iou_overlap_threshold,
+    )
+    eval_stitched_grid = evaluate_instances(stitched_grid, mosaic_grid_gt)
+    n_stitched_grid = len(np.unique(stitched_grid)) - (1 if 0 in stitched_grid else 0)
+    print("\n--- Resultado após fusão de instâncias ---")
+    print(f"Predições após fusão: {n_stitched_grid} instâncias")
+    print(
+        f"mAP antes/depois: {eval_crop['mAP']:.4f} -> {eval_stitched_grid['mAP']:.4f} | "
+        f"erro de contagem: {eval_crop['count_error']} -> {eval_stitched_grid['count_error']}"
+    )
+
+    # 5. Execução do Tiling Ingênuo - Modo Direct-Stamp
     print("\n--- Executando Tiling Ingênuo: Modo 'direct_stamp' (Estampa Direta com IDs Independentes) ---")
     naive_res_stamp = predict_tiled_naive(
         mosaic_grid_img,
@@ -141,7 +175,7 @@ def main() -> None:
     print(f"mAP@[.50:.95]: {eval_stamp['mAP']:.4f} | AP@0.50: {eval_stamp['AP_per_iou'][0.50]:.4f} | AP@0.75: {eval_stamp['AP_per_iou'][0.75]:.4f}")
     print(f"Erro absoluto de contagem: {eval_stamp['count_error']} (|{naive_res_stamp['num_instances']} - {n_gt_grid}|)")
 
-    # 5. Gera visualização principal de falha do mosaico em grade
+    # 6. Gera visualizações antes/depois do mosaico em grade
     plot_path_grid = os.path.join(args.output_dir, "tiling_naive_failure.png")
     plot_tiling_failure_analysis(
         mosaic_image=mosaic_grid_img,
@@ -150,8 +184,17 @@ def main() -> None:
         tile_boxes=naive_res_crop["tile_boxes"],
         save_path=plot_path_grid,
     )
+    plot_stitching_comparison(
+        image=mosaic_grid_img,
+        ground_truth=mosaic_grid_gt,
+        naive_prediction=naive_res_crop["naive_instance_mask"],
+        stitched_prediction=stitched_grid,
+        save_path=os.path.join(args.output_dir, "stitching_before_after.png"),
+        before_map=eval_crop["mAP"],
+        after_map=eval_stitched_grid["mAP"],
+    )
 
-    # 6. Teste com lâmina contínua real de alta resolução (696x520)
+    # 7. Teste com lâmina contínua real de alta resolução (696x520)
     # Seleciona a lâmina '0ea221716cf13710214dcd331a61cea48308c3940df1d28cfc7fd817c83714e1' do conjunto de validação
     large_val_id = "0ea221716cf13710214dcd331a61cea48308c3940df1d28cfc7fd817c83714e1"
     continuous_results: Dict[str, Any] = {}
@@ -174,12 +217,24 @@ def main() -> None:
             mode="center_crop",
         )
         eval_cont = evaluate_instances(naive_cont["naive_instance_mask"], cont_gt)
+        stitched_cont = stitch_tiles_with_fusion(
+            tiles_preds=naive_cont["tiles_preds"],
+            tile_boxes=naive_cont["tile_boxes"],
+            full_shape=cont_gt.shape,
+            iou_overlap_threshold=args.iou_overlap_threshold,
+        )
+        eval_stitched_cont = evaluate_instances(stitched_cont, cont_gt)
+        n_stitched_cont = len(np.unique(stitched_cont)) - (1 if 0 in stitched_cont else 0)
         split_cont = detect_split_nuclei(cont_gt, naive_cont["tile_boxes"], naive_pred=naive_cont["naive_instance_mask"])
         split_count_cont = sum(1 for d in split_cont["split_gt_details"] if d.get("num_fragments", 0) >= 2)
 
         print(f"GT contínuo: {n_gt_cont} núcleos | Predição ingênua: {naive_cont['num_instances']} instâncias")
         print(f"mAP@[.50:.95]: {eval_cont['mAP']:.4f} | AP@0.50: {eval_cont['AP_per_iou'][0.50]:.4f} | AP@0.75: {eval_cont['AP_per_iou'][0.75]:.4f}")
         print(f"Erro de contagem: {eval_cont['count_error']}")
+        print(
+            f"Após fusão: {n_stitched_cont} instâncias | mAP {eval_stitched_cont['mAP']:.4f} "
+            f"| erro de contagem {eval_stitched_cont['count_error']}"
+        )
         print(f"Núcleos na fronteira: {split_cont['num_boundary_nuclei']} | Fatiados: {split_count_cont}")
 
         plot_path_cont = os.path.join(args.output_dir, "tiling_naive_failure_continuous.png")
@@ -189,6 +244,15 @@ def main() -> None:
             naive_pred=naive_cont["naive_instance_mask"],
             tile_boxes=naive_cont["tile_boxes"],
             save_path=plot_path_cont,
+        )
+        plot_stitching_comparison(
+            image=cont_img,
+            ground_truth=cont_gt,
+            naive_prediction=naive_cont["naive_instance_mask"],
+            stitched_prediction=stitched_cont,
+            save_path=os.path.join(args.output_dir, "stitching_before_after_continuous.png"),
+            before_map=eval_cont["mAP"],
+            after_map=eval_stitched_cont["mAP"],
         )
 
         continuous_results = {
@@ -201,10 +265,16 @@ def main() -> None:
             "count_error": eval_cont["count_error"],
             "boundary_nuclei": split_cont["num_boundary_nuclei"],
             "split_nuclei_count": split_count_cont,
+            "n_pred_stitched": n_stitched_cont,
+            "mAP_stitched": eval_stitched_cont["mAP"],
+            "ap50_stitched": eval_stitched_cont["AP_per_iou"][0.50],
+            "ap75_stitched": eval_stitched_cont["AP_per_iou"][0.75],
+            "count_error_stitched": eval_stitched_cont["count_error"],
         }
 
-    # 7. Salva resumo em JSON
+    # 8. Salva resumo em JSON
     metrics_summary = {
+        "iou_overlap_threshold": args.iou_overlap_threshold,
         "mosaic_grid_sample": {
             "image_ids": selected_4_ids,
             "total_gt_nuclei": n_gt_grid,
@@ -229,10 +299,19 @@ def main() -> None:
                 "count_error": eval_stamp["count_error"],
             },
         },
+        "mosaic_grid_stitched": {
+            "n_gt": n_gt_grid,
+            "n_pred": n_stitched_grid,
+            "mAP": eval_stitched_grid["mAP"],
+            "ap50": eval_stitched_grid["AP_per_iou"][0.50],
+            "ap75": eval_stitched_grid["AP_per_iou"][0.75],
+            "count_error": eval_stitched_grid["count_error"],
+            "mAP_gain": eval_stitched_grid["mAP"] - eval_crop["mAP"],
+        },
         "continuous_large_image": continuous_results,
     }
 
-    json_path = os.path.join(args.output_dir, "naive_tiling_metrics.json")
+    json_path = os.path.join(args.output_dir, "tiling_before_after_metrics.json")
     with open(json_path, "w") as f:
         json.dump(metrics_summary, f, indent=2)
     print(f"\n[Parte 4] Métricas salvas em: {json_path}")

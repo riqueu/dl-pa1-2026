@@ -97,3 +97,35 @@ stitched_mask = stitch_tiles_with_fusion(
 
 **Meta para a Fusão (Membro B):**  
 Restabelecer os núcleos fatiados, eliminar duplicações na faixa de overlap e recuperar o mAP de volta para a faixa de $\ge 0.50$, reduzindo o erro de contagem de $+33$ para próximo de zero.
+
+---
+
+## 6. Correção Implementada e Reprodução
+
+O módulo `src/stitching.py` implementa a correção proposta com quatro etapas:
+
+1. cria um ID provisório para cada par `(tile, id_local)`;
+2. calcula o IoU restrito a cada faixa de sobreposição;
+3. faz matching guloso um-para-um e união transitiva por Union-Find;
+4. resolve conflitos de pixels priorizando o centro do tile e renumera os IDs globais.
+
+O script integrado mede o mesmo mosaico antes e depois da correção:
+
+```bash
+python scripts/run_mosaic_demo.py \
+  --checkpoint checkpoints/part2_watershed.pth \
+  --tile_size 256 \
+  --stride 128 \
+  --iou_overlap_threshold 0.20 \
+  --output_dir outputs/part4_mosaic
+```
+
+Além dos diagnósticos ingênuos, a execução gera:
+
+- `tiling_before_after_metrics.json`, com mAP, AP@0.50, AP@0.75 e erro de contagem;
+- `stitching_before_after.png`, para o mosaico em grade;
+- `stitching_before_after_continuous.png`, quando a lâmina contínua está disponível.
+
+O limiar de fusão deve ser calibrado somente na validação e então congelado para
+a avaliação final. Os resultados numéricos depois da fusão são preenchidos pela
+execução acima no mesmo ambiente que contém os dados e o checkpoint da Parte 2.
