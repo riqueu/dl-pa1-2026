@@ -115,7 +115,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--splits_path", default="data/splits.json")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--out", default=None, help="Pasta da execução. Default: runs/<config>.")
-    parser.add_argument("--checkpoint", default="checkpoints/best_model.pth")
+    parser.add_argument("--checkpoint", default="checkpoints/part1_baseline.pth")
     parser.add_argument(
         "--select_by",
         choices=["mAP", "iou"],

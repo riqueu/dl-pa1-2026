@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="checkpoints/best_model.pth",
+        default="checkpoints/part2_watershed.pth",
         help="Caminho para os pesos salvos do modelo (.pth)",
     )
     parser.add_argument(

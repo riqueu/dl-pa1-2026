@@ -177,7 +177,7 @@ python train.py --dataset synthetic --epochs 10 --num_samples 500 --batch_size 1
 ### 4.2. Treinamento do Baseline Semântico (Parte 1)
 Treinamento da U-Net (ResNet34) na base real DSB2018 com BCE balanceada + Soft Dice:
 ```bash
-python train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out runs/part1_baseline --checkpoint checkpoints/best_model.pth
+python train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out runs/part1_baseline --checkpoint checkpoints/part1_baseline.pth
 ```
  
 ### 4.3. Treinamento da Cabeça de Instâncias (Parte 2 — Trilha A Watershed)
@@ -190,7 +190,7 @@ python train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out_cha
 Avaliação com matching Hungarian IoU para cálculo de mAP@[.50:.95], contagem e geração de diagnósticos:
 ```bash
 # Avaliar Baseline da Parte 1 (Componentes Conexos)
-python evaluate.py --checkpoint checkpoints/best_model.pth --dataset dsb2018 --split val --matching hungarian --output-dir outputs/part1_eval
+python evaluate.py --checkpoint checkpoints/part1_baseline.pth --dataset dsb2018 --split val --matching hungarian --output-dir outputs/part1_eval
 
 # Avaliar Trilha A da Parte 2 (Watershed)
 python evaluate.py --checkpoint checkpoints/part2_watershed.pth --dataset dsb2018 --split val --matching hungarian --output-dir outputs/part2_eval
@@ -254,11 +254,18 @@ O script exporta mAP@[.50:.95], AP50, AP75, erro de contagem, retenção relativ
 
 ## 5. Notebook de Inferência e Checkpoints
 
-- **Inferência direta:** O notebook [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb) atua como a vitrine técnica central do projeto. Ele implementa a função `predict_instances(image_path, model)` atendendo ao requisito oficial (*"recebe o caminho de uma imagem qualquer, devolve a máscara de instâncias colorida e a contagem. Roda sem retreinar"*). Por padrão, carrega o modelo oficial da Parte 2 (`checkpoints/part2_watershed.pth`), executando a decodificação Watershed instantaneamente na GPU/CPU.
-- **Checkpoints disponíveis:**
-  - `checkpoints/part0_synthetic.pth`: U-Net treinada nos dados sintéticos procedurais ($IoU > 0.99$).
-  - `checkpoints/best_model.pth`: Baseline semântico binário da Parte 1 ($mAP = 0.4820$).
-  - `checkpoints/part2_watershed.pth`: Modelo oficial da Parte 2 com cabeça Watershed ($mAP = 0.5157$).
+- **Inferência direta:** O notebook [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb) atua como a vitrine técnica central do projeto. Ele implementa a função `predict_instances(image_path, model)` atendendo integralmente ao requisito oficial do edital (*"recebe o caminho de uma imagem qualquer, devolve a máscara de instâncias colorida e a contagem. Roda sem retreinar"*). Por padrão, carrega o modelo oficial da Parte 2 (`checkpoints/part2_watershed.pth`), executando a decodificação Watershed instantaneamente na GPU/CPU.
+- **Checkpoints dos Modelos Treinados:**
+  Conforme estabelecido nas instruções de entrega (*"Pesos do modelo final (.pth) (link se for grande)"*), os checkpoints possuem ~99 MB cada e estão hospedados na [Release v1.0.0](https://github.com/riqueu/dl-pa1-2026/releases/tag/v1.0.0) do GitHub:
+  - [Download `part2_watershed.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part2_watershed.pth): Modelo oficial da Parte 2 com cabeça Watershed ($mAP = 0.5157$).
+  - [Download `part1_baseline.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part1_baseline.pth): Baseline semântico binário da Parte 1 ($mAP = 0.4820$).
+  - [Download `part0_synthetic.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part0_synthetic.pth): U-Net de teste de sanidade sintético ($IoU > 0.99$).
+
+Para baixar o modelo oficial diretamente via linha de comando:
+```bash
+wget -P checkpoints/ https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part2_watershed.pth
+```
+
 
 ## 6. Registro de Uso de Inteligência Artificial
 
