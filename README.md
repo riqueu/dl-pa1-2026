@@ -17,6 +17,7 @@ Este projeto implementa e avalia métodos autorais de segmentação de instânci
 4. **Parte 3 (Ablações):** Eixo 1 (Recuperação de Resolução: U-Net Skips vs. DeepLab ASPP vs. No-Skips) e Eixo 2 (Perdas e Desbalanceamento: CE Ponderada vs. Focal Loss $\gamma \in \{0, 1, 2, 5\}$).
 5. **Parte 4 (Mosaico & Costura):** Inferência em janelas deslizantes (tiling) e algoritmo autoral de fusão de instâncias na faixa de sobreposição (*Instance Stitching* via Union-Find).
 6. **Parte 5 (Galeria de Falhas & Diagnósticos):** Diagnóstico formal dos 5 modos críticos de falha, análise teórica de campo receptivo ($RF_{\text{encoder}} = 899\text{ px} \gg d_{\text{médio}} = 21.4\text{ px}$) em 29.461 núcleos e correção adaptativa via consolidação morfológica de sementes (+17.78 p.p. mAP, erro de contagem zerado).
+7. **Parte 6 (Teste de Estresse — Mudança de Escala):** Avaliação de robustez sob $0{,}5\times$ ($128 \times 128$) e $2{,}0\times$ ($512 \times 512$) contrastando U-Net ResNet-34 contra DeepLabv3 ASPP, demonstrando por que FCNs não são invariantes a escala e como o ASPP falha catastroficamente em sub-resolução (-88.9% de queda) por amostragem além dos limites celulares, mas recupera desempenho em sobre-resolução (+92.7%).
 
 ### Resumo Comparativo de Desempenho (Validação DSB2018, Hungarian Matching)
 
@@ -36,6 +37,10 @@ Este projeto implementa e avalia métodos autorais de segmentação de instânci
 | **Parte 4: Mosaico 2x2 (310 GT)** | Costura com Fusão (Union-Find, $\tau=0.20$) | **0.4413 (+5.15 pp)** | **0.7479 (+7.35 pp)** | **+4 núcleos** | — |
 | **Parte 5: Células Gigantes (19 GT)** | Watershed Padrão (Hiper-fragmentação) | 0.0740 | 0.1250 | +52 núcleos | — |
 | **Parte 5: Células Gigantes (19 GT)** | Watershed Adaptativo (Consolidação Sementes) | **0.2518 (+17.78 pp)** | **0.3571 (+23.21 pp)** | **0 núcleos (exato!)** | — |
+| **Parte 6: Escala 0.5x (Downscale)** | U-Net ResNet-34 (Skip Connections) | 0.3446 (-33.2%) | 0.6295 | 11.12 núcleos/img | — |
+| **Parte 6: Escala 0.5x (Downscale)** | DeepLabv3 ASPP (Dilatações r=6,12,18) | 0.0176 (-88.9% colapso) | 0.0481 | 37.40 núcleos/img | — |
+| **Parte 6: Escala 2.0x (Upscale)** | U-Net ResNet-34 (Skip Connections) | 0.3144 (-39.0%) | 0.4867 | 31.72 núcleos/img | — |
+| **Parte 6: Escala 2.0x (Upscale)** | DeepLabv3 ASPP (Dilatações r=6,12,18) | **0.3061 (+92.7% ganho)** | **0.5201** | **13.67 núcleos/img** | — |
 
 ```bash
 dl-pa1-2026
@@ -53,7 +58,15 @@ dl-pa1-2026
 ├── LICENSE
 ├── notebooks/
 │   ├── exploratory.ipynb  # Prototipação e inspeção de dados
-│   └── inferencia.ipynb   # Vitrine técnica completa (Partes 0 a 5)
+│   └── inferencia.ipynb   # Vitrine técnica completa (Partes 0 a 6 + Pipeline Final)
+├── outputs/               # Gráficos, métricas JSON e evidências visuais geradas
+│   ├── part1_eval/
+│   ├── part2_eval/
+│   ├── part3_eixo1/
+│   ├── part3_eixo2/
+│   ├── part4_mosaic/
+│   ├── part5_gallery/     # 5 casos de falha, distribuição de diâmetros e correção
+│   └── part6_stress/      # Curvas de degradação e painel visual multiescala
 ├── PA1.pdf
 ├── README.md
 ├── requirements.txt
@@ -62,6 +75,7 @@ dl-pa1-2026
 │   ├── run_eixo2.sh       # Execução da grade do Eixo 2
 │   ├── run_failure_gallery.py # Rastreio de falhas, campo receptivo e correção adaptativa
 │   ├── run_mosaic_demo.py # Demonstração integrada de tiling e fusão
+│   ├── run_scale_stress.py    # Teste de estresse de escala (0.5x, 1.0x, 2.0x)
 │   ├── summarize_eixo1.py # Consolidação de métricas do Eixo 1
 │   └── summarize_eixo2.py # Consolidação de métricas do Eixo 2
 ├── src/
@@ -71,10 +85,11 @@ dl-pa1-2026
 │   ├── metrics.py         # Matching Hungarian/Greedy e cálculo de mAP@[.50:.95]
 │   ├── models.py          # U-Net autoral, ASPP e variantes DeepLab
 │   ├── mosaic.py          # Montagem de mosaicos e janelas deslizantes
-│   ├── postprocess.py     # Componentes conexos e decodificação Watershed
+│   ├── postprocess.py     # Componentes conexos e decodificação Watershed adaptativo
+│   ├── scale_stress.py    # Redimensionamento e decodificação em escala de inferência
 │   ├── stitching.py      # Fusão de instâncias via IoU e Union-Find
 │   └── utils.py           # Colorização, overlay e campo receptivo teórico
-├── tests/                 # Suíte de testes unitários (12 testes passando)
+├── tests/                 # Suíte de testes unitários (22 testes passando)
 └── train.py               # Pipeline de treino configurável via argumentos CLI
 ```
 
@@ -212,10 +227,19 @@ python scripts/run_mosaic_demo.py \
 
 Demonstração interativa, tabela quantitativa antes vs. depois e diagnósticos visuais de reconciliação de bordas estão disponíveis em [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb).
 
-### 4.7. Teste de Estresse por Mudanca de Escala (Parte 6)
+### 4.7. Galeria de Falhas, Campo Receptivo e Correção Adaptativa (Parte 5)
 
-Compara a U-Net com Watershed e o DeepLab/ASPP autoral em 0,5x, 1,0x e
-2,0x, mantendo o pipeline congelado e executando um controle de area minima:
+Executa o mapeamento sistemático dos 5 casos críticos de falha, extrai a distribuição morfológica dos 29.461 núcleos celulares vs. o campo receptivo teórico do encoder ($RF = 899\text{ px}$) e demonstra a recuperação por consolidação morfológica de sementes (`seed_closing_radius=4`):
+
+```bash
+python scripts/run_failure_gallery.py
+```
+
+O script gera os painéis diagnósticos de 4 vistas em `outputs/part5_gallery/failure_case_[1-5].png`, a curva de distribuição empírica em `outputs/part5_gallery/nuclei_size_distribution.png`, a evidência Antes vs. Depois em `outputs/part5_gallery/correction_before_after.png` e as métricas consolidadas em `outputs/part5_gallery/gallery_metrics.json`.
+
+### 4.8. Teste de Estresse por Mudança de Escala (Parte 6 — Opção 3)
+
+Compara a U-Net com Watershed e o DeepLab/ASPP autoral sob fatores de escala de $0{,}5\times$, $1{,}0\times$ e $2{,}0\times$:
 
 ```bash
 python scripts/run_scale_stress.py \
@@ -224,8 +248,7 @@ python scripts/run_scale_stress.py \
   --output-dir outputs/part6_stress
 ```
 
-O script exporta mAP@[.50:.95], AP50, AP75, erro de contagem, retencao relativa
-e os paineis comparativos em `outputs/part6_stress/`.
+O script exporta mAP@[.50:.95], AP50, AP75, erro de contagem, retenção relativa e as curvas de degradação e painel visual comparativo em `outputs/part6_stress/`.
 
 ---
 

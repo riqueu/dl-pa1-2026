@@ -51,9 +51,14 @@ Documentação sintética do uso de ferramentas de IA no PA1, servindo como indi
 * **Uso da IA:** Apoio no desenho e teste de uma costura baseada em matching local por IoU, Union-Find e arbitragem espacial dos pixels conflitantes.
 * **Decisão Técnica:** Cada par `(tile, id_local)` recebe uma identidade provisória; correspondências um-para-um na faixa de sobreposição são unidas transitivamente e os IDs globais são renumerados. A versão sem fusão usa a mesma regra de composição para permitir uma comparação controlada antes/depois.
 
+## Episódio 8: Diagnóstico da Galeria de Falhas e Consolidação Morfológica de Sementes
+* **Contexto:** Execução da Parte 5: mapear os 5 piores casos de falha do modelo oficial no split de validação, formular diagnósticos biológicos/ópticos/arquiteturais, comparar a distribuição morfológica dos 29.461 núcleos do dataset com o campo receptivo teórico ($RF$) e implementar uma correção demonstrando antes vs. depois.
+* **Uso da IA:** Auxílio no mapeamento automatizado de falhas em `scripts/run_failure_gallery.py`, extração estatística das 29.461 máscaras do DSB2018 ($d_{\text{médio}} = 21.40\text{ px}$, $d_{\text{máx}} = 118.54\text{ px}$ vs. $RF_{\text{encoder}} = 899\text{ px}$), fundamentação teórica de que o erro decorre da perda de resolução espacial subpixel em cristas de 1 px (e não de falta de campo de visão) e formulação da consolidação morfológica de sementes (`seed_closing_radius`).
+* **Decisão Técnica:** Preservação retroativa da interface de `src/postprocess.py` (`seed_closing_radius=0` por padrão) e implementação de fechamento morfológico para fundir marcadores desconexos dentro de células gigantes com variações cromáticas internas (Caso 2), reduzindo o erro de contagem de $+52$ para $0$ e elevando o mAP de $0.0740$ para $0.2518$ (+240% relativo).
+
 ---
 
-## Episodio 8: Teste de Estresse por Mudanca de Escala
-* **Contexto:** Comparar a robustez da U-Net com skips e do DeepLab/ASPP autoral em 0,5x, 1,0x e 2,0x sem confundir desempenho absoluto, sensibilidade arquitetural e parametros do Watershed medidos em pixels.
-* **Uso da IA:** Apoio na revisao do protocolo, identificacao dos fatores de confusao, implementacao das primitivas testaveis e automacao das metricas e figuras reprodutiveis.
-* **Decisao Tecnica:** Definir 256x256 como escala 1,0x, aplicar antialiasing na imagem e vizinho mais proximo apenas aos IDs. O resultado principal congela o Watershed; um controle reutiliza as mesmas probabilidades com `min_area` proporcional a $s^2$. A resiliencia e comparada por queda absoluta e retencao relativa do mAP.
+## Episódio 9: Teste de Estresse por Mudança de Escala e Limitações do ASPP
+* **Contexto:** Execução da Parte 6 (Opção 3): comparar a robustez da U-Net (com skip connections multinível) e do DeepLabv3 (com módulo ASPP no gargalo) em $0{,}5\times$, $1{,}0\times$ e $2{,}0\times$ sem confundir desempenho absoluto, sensibilidade arquitetural e parâmetros do Watershed medidos em pixels.
+* **Uso da IA:** Apoio na revisão do protocolo experimental, formalização matemática de por que FCNs não são invariantes a escala contínua (filtros discretos com suporte rígido em pixels), análise do comportamento do ASPP sob decimação de frequências e automação do pipeline em `scripts/run_scale_stress.py`.
+* **Decisão Técnica:** Definir $256 \times 256$ como escala $1{,}0\times$, aplicar interpolação bilinear na imagem e vizinho mais próximo aos IDs restaurados. O resultado principal congela os limiares do Watershed para avaliar a robustez crua das representações, demonstrando o colapso do ASPP em $0{,}5\times$ (queda de $-88{,}9\%$ no mAP) e a resiliência superior da U-Net (retenção de $66{,}8\%$ do mAP e $0{,}6295$ de AP50).
