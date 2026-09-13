@@ -236,3 +236,4 @@ CLAUDE.md
 testvenv/
 # pesos das execuções de treino (os JSONs de cada run ficam versionados)
 runs/**/*.pth
+scratch/
