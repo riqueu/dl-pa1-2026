@@ -212,6 +212,21 @@ python scripts/run_mosaic_demo.py \
 
 Demonstração interativa, tabela quantitativa antes vs. depois e diagnósticos visuais de reconciliação de bordas estão disponíveis em [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb).
 
+### 4.7. Teste de Estresse por Mudanca de Escala (Parte 6)
+
+Compara a U-Net com Watershed e o DeepLab/ASPP autoral em 0,5x, 1,0x e
+2,0x, mantendo o pipeline congelado e executando um controle de area minima:
+
+```bash
+python scripts/run_scale_stress.py \
+  --unet-checkpoint checkpoints/part2_watershed.pth \
+  --aspp-checkpoint checkpoints/part3_eixo1/deeplab_aspp_seed42.pth \
+  --output-dir outputs/part6_stress
+```
+
+O script exporta mAP@[.50:.95], AP50, AP75, erro de contagem, retencao relativa
+e os paineis comparativos em `outputs/part6_stress/`.
+
 ---
 
 ## 5. Notebook de Inferência e Checkpoints
