@@ -1,272 +1,109 @@
 # PA1 - Segmentação de Instâncias com Arquiteturas Densas
 
-Repositório para o Programming Assignment 1 (PA1) da disciplina de Aprendizado Profundo (FGV EMAp).
+Programming Assignment 1 da disciplina de Aprendizado Profundo (FGV EMAp).  
+Segmentação de instâncias em microscopia celular (DSB2018 / BBBC038v1) utilizando arquiteturas densas com representações e decodificadores autorais.
 
-## Dupla
+## Autores
 - [Henrique Coelho Beltrão](https://github.com/riqueu)
 - [Isaias Gouvêa Gonçalves](https://github.com/isaiasgoncalves)
 
 ---
 
-## 1. Visão Geral do Projeto
+## 1. Visão Geral e Resultados-Chave
 
-Este projeto implementa e avalia métodos autorais de segmentação de instâncias para microscopia celular baseados no dataset **Data Science Bowl 2018 (DSB2018)**. O fluxo é estruturado em:
-1. **Parte 0 (Teste de Sanidade Sintético):** Validação da U-Net autoral em dados procedurais de elipses sobrepostas com convergência estrita ($IoU > 0.99$).
-2. **Parte 1 (Baseline Semântico):** U-Net com encoder ResNet34 pré-treinado e decoder autoral, extraindo instâncias ingenuamente via componentes conexos e quantificando o colapso de mAP em função da densidade de núcleos.
-3. **Parte 2 (Instance Head — Trilha A: Fronteiras e Watershed):** Segmentação multitarefa em 3 classes ($P(\text{fundo}), P(\text{interior}), P(\text{fronteira})$) com Cross-Entropy balanceada e decodificação topográfica por Watershed, superando o baseline em mAP (+3.37 p.p. global e +19.31 p.p. no caso denso).
-4. **Parte 3 (Ablações):** Eixo 1 (Recuperação de Resolução: U-Net Skips vs. DeepLab ASPP vs. No-Skips) e Eixo 2 (Perdas e Desbalanceamento: CE Ponderada vs. Focal Loss $\gamma \in \{0, 1, 2, 5\}$).
-5. **Parte 4 (Mosaico & Costura):** Inferência em janelas deslizantes (tiling) e algoritmo autoral de fusão de instâncias na faixa de sobreposição (*Instance Stitching* via Union-Find).
-6. **Parte 5 (Galeria de Falhas & Diagnósticos):** Diagnóstico formal dos 5 modos críticos de falha, análise teórica de campo receptivo ($RF_{\text{encoder}} = 899\text{ px} \gg d_{\text{médio}} = 21.4\text{ px}$) em 29.461 núcleos e correção adaptativa via consolidação morfológica de sementes (+17.78 p.p. mAP, erro de contagem zerado).
-7. **Parte 6 (Teste de Estresse — Mudança de Escala):** Avaliação de robustez sob $0{,}5\times$ ($128 \times 128$) e $2{,}0\times$ ($512 \times 512$) contrastando U-Net ResNet-34 contra DeepLabv3 ASPP, demonstrando por que FCNs não são invariantes a escala e como o ASPP falha catastroficamente em sub-resolução (-88.9% de queda) por amostragem além dos limites celulares, mas recupera desempenho em sobre-resolução (+92.7%).
+O projeto desenvolve uma solução autoral de segmentação de instâncias baseada em **U-Net com encoder ResNet-34**, desacoplamento por **fronteiras de 1 px e decodificação Watershed (Trilha A)**, superando o baseline semântico e solucionando problemas práticos de mosaico, falhas morfológicas e robustez a escala:
 
-### Resumo Comparativo de Desempenho (Validação DSB2018, Hungarian Matching)
-
-| Parte / Abordagem | Configuração | mAP@[.50:.95] | AP @ IoU 0.50 | Erro Médio Contagem | IoU Semântico |
-| :--- | :--- | :---: | :---: | :---: | :---: |
-| **Parte 1: Baseline Semântico** | U-Net ResNet34 (Componentes Conexos) | 0.4820 | 0.6611 | 8.55 núcleos/img | **0.8439** |
-| **Parte 2: Trilha A Oficial** | U-Net ResNet34 (Fronteiras e Watershed) | **0.5157** | **0.7165** | **7.40 núcleos/img** | 0.8236 |
-| *Caso Crítico Denso (369 núcleos)* | *Baseline Semântico (Fusão Severa)* | *0.1443* | *—* | *174 núcleos (subcontagem)* | *—* |
-| *Caso Crítico Denso (369 núcleos)* | *Trilha A (Watershed Desacoplado)* | **0.3374** | *—* | **47 núcleos (-73% erro)** | *—* |
-| **Parte 3: Eixo 1 (Resolução)** | U-Net Padrão (Skip Connections) | **0.4901 ± 0.0210** | **0.7098 ± 0.0076** | **5.99 ± 0.11** | **0.8125 ± 0.0105** |
-| **Parte 3: Eixo 1 (Resolução)** | U-Net sem Skips (Gargalo Cego) | 0.2172 ± 0.0713 | 0.4354 ± 0.1190 | 19.54 ± 6.97 | 0.6407 ± 0.0784 |
-| **Parte 3: Eixo 1 (Resolução)** | DeepLabv3 (Atrous OS16 + ASPP) | 0.1588 ± 0.0008 | 0.3541 ± 0.0029 | 25.34 ± 0.91 | 0.6002 ± 0.0037 |
-| **Parte 3: Eixo 2 (Perdas)** | Cross-Entropy Ponderada ($\alpha$) | **0.5002 ± 0.0155** | **0.7141 ± 0.0024** | 7.25 ± 0.15 | **0.8134 ± 0.0102** |
-| **Parte 3: Eixo 2 (Perdas)** | Focal Loss ($\gamma = 0$) | **0.5015 ± 0.0205** | **0.7140 ± 0.0096** | **7.07 ± 0.37** | 0.8083 ± 0.0139 |
-| **Parte 3: Eixo 2 (Perdas)** | Focal Loss ($\gamma = 5$) | 0.3636 ± 0.0059 | 0.6329 ± 0.0188 | 10.32 ± 0.96 | 0.7533 ± 0.0060 |
-| **Parte 4: Mosaico 2x2 (310 GT)** | Tiling Ingênuo (Center-Crop) | 0.3898 | 0.6744 | +33 núcleos | — |
-| **Parte 4: Mosaico 2x2 (310 GT)** | Costura com Fusão (Union-Find, $\tau=0.20$) | **0.4413 (+5.15 pp)** | **0.7479 (+7.35 pp)** | **+4 núcleos** | — |
-| **Parte 5: Células Gigantes (19 GT)** | Watershed Padrão (Hiper-fragmentação) | 0.0740 | 0.1250 | +52 núcleos | — |
-| **Parte 5: Células Gigantes (19 GT)** | Watershed Adaptativo (Consolidação Sementes) | **0.2518 (+17.78 pp)** | **0.3571 (+23.21 pp)** | **0 núcleos (exato!)** | — |
-| **Parte 6: Escala 0.5x (Downscale)** | U-Net ResNet-34 (Skip Connections) | 0.3446 (-33.2%) | 0.6295 | 11.12 núcleos/img | — |
-| **Parte 6: Escala 0.5x (Downscale)** | DeepLabv3 ASPP (Dilatações r=6,12,18) | 0.0176 (-88.9% colapso) | 0.0481 | 37.40 núcleos/img | — |
-| **Parte 6: Escala 2.0x (Upscale)** | U-Net ResNet-34 (Skip Connections) | 0.3144 (-39.0%) | 0.4867 | 31.72 núcleos/img | — |
-| **Parte 6: Escala 2.0x (Upscale)** | DeepLabv3 ASPP (Dilatações r=6,12,18) | **0.3061 (+92.7% ganho)** | **0.5201** | **13.67 núcleos/img** | — |
-
-```bash
-dl-pa1-2026
-├── AI_LOG.md              # Registro conciso de assistência de IA
-├── checkpoints/           # Pesos dos modelos treinados (.pth)
-├── data/                  # DSB2018 stage1_train e splits estratificados
-├── docs/                  # Guias de planejamento e divisão de tarefas da dupla
-│   ├── parte0e1.md        # Planejamento das Partes 0 e 1
-│   ├── parte2.md          # Planejamento da Trilha A (Watershed)
-│   ├── parte3.md          # Planejamento das Ablações (Eixos 1 e 2)
-│   ├── parte4.md          # Planejamento de Mosaico e Costura de Instâncias
-│   ├── parte5.md          # Planejamento da Galeria de Falhas e Diagnósticos
-│   └── parte6.md          # Planejamento do Teste de Estresse (Escala e ASPP)
-├── evaluate.py            # Avaliação em lote no conjunto de teste/validação
-├── LICENSE
-├── notebooks/
-│   ├── exploratory.ipynb  # Prototipação e inspeção de dados
-│   └── inferencia.ipynb   # Vitrine técnica completa (Partes 0 a 6 + Pipeline Final)
-├── outputs/               # Gráficos, métricas JSON e evidências visuais geradas
-│   ├── part1_eval/
-│   ├── part2_eval/
-│   ├── part3_eixo1/
-│   ├── part3_eixo2/
-│   ├── part4_mosaic/
-│   ├── part5_gallery/     # 5 casos de falha, distribuição de diâmetros e correção
-│   └── part6_stress/      # Curvas de degradação e painel visual multiescala
-├── PA1.pdf
-├── README.md
-├── requirements.txt
-├── scripts/               # Scripts de automação e reprodução
-│   ├── run_eixo1.sh       # Execução da grade do Eixo 1
-│   ├── run_eixo2.sh       # Execução da grade do Eixo 2
-│   ├── run_failure_gallery.py # Rastreio de falhas, campo receptivo e correção adaptativa
-│   ├── run_mosaic_demo.py # Demonstração integrada de tiling e fusão
-│   ├── run_scale_stress.py    # Teste de estresse de escala (0.5x, 1.0x, 2.0x)
-│   ├── summarize_eixo1.py # Consolidação de métricas do Eixo 1
-│   └── summarize_eixo2.py # Consolidação de métricas do Eixo 2
-├── src/
-│   ├── dataset.py         # Datasets reais, gerador sintético e alvos 3-classes
-│   ├── __init__.py
-│   ├── losses.py          # CE balanceada, Focal Loss multiclasse e pesos
-│   ├── metrics.py         # Matching Hungarian/Greedy e cálculo de mAP@[.50:.95]
-│   ├── models.py          # U-Net autoral, ASPP e variantes DeepLab
-│   ├── mosaic.py          # Montagem de mosaicos e janelas deslizantes
-│   ├── postprocess.py     # Componentes conexos e decodificação Watershed adaptativo
-│   ├── scale_stress.py    # Redimensionamento e decodificação em escala de inferência
-│   ├── stitching.py      # Fusão de instâncias via IoU e Union-Find
-│   └── utils.py           # Colorização, overlay e campo receptivo teórico
-├── tests/                 # Suíte de testes unitários (22 testes passando)
-└── train.py               # Pipeline de treino configurável via argumentos CLI
-```
+| Etapa / Experimento | Abordagem Avaliada | Comparação / Linha de Base | mAP@[.50:.95] | Ganho / Variação | Erro de Contagem |
+| :--- | :--- | :--- | :---: | :---: | :---: |
+| **Parte 1: Baseline** | U-Net Binária + Componentes Conexos | Segmentação Semântica Pura | 0.4820 | — | 8.55 núcleos/img |
+| **Parte 2: Modelo Final** | U-Net 3-Canais + Watershed (Trilha A) | vs. Baseline Semântico (Parte 1) | **0.5157** | **+3.37 pp** | **7.40 núcleos/img** |
+| *Caso Denso (369 núcleos)* | *Watershed Desacoplado* | *vs. Fusão por Componentes Conexos* | **0.3374** | **+19.31 pp** | **47** *(vs. 174)* |
+| **Parte 3: Ablações** | U-Net com Skip Connections | vs. Gargalo Cego / ASPP | **0.4901** | **+27.29 pp** *(vs. Gargalo)* | **5.99 núcleos/img** |
+| **Parte 4: Mosaico** | Costura de Instâncias (Union-Find) | vs. Tiling Ingênuo (sem fusão) | **0.4413** | **+5.15 pp** | **+4** *(vs. +33 duplicadas)* |
+| **Parte 5: Correção** | Watershed Adaptativo (fechamento $r=4$) | vs. Watershed Padrão (hiper-fragmentado) | **0.2518** | **+17.78 pp** | **0** *(exato, vs. +52)* |
+| **Parte 6: Estresse (0.5×)** | U-Net ResNet-34 (multiescala) | vs. DeepLabv3 ASPP (dilatação fixa) | **0.3446** | **+32.70 pp** *(ASPP = 0.0176)* | **11.12** *(vs. 37.40)* |
 
 ---
 
 ## 2. Configuração do Ambiente
 
-Recomenda-se o uso de ambiente virtual (venv ou conda) com Python 3.10+.
-
-Criar e ativar o ambiente virtual:
+Python 3.10+ em ambiente virtual:
 ```bash
 python -m venv venv
 source venv/bin/activate
-```
-
-Instalar dependências:
-```bash
 pip install -r requirements.txt
 ```
 
 ---
 
-## 3. Obtenção e Organização dos Dados
+## 3. Dados (DSB2018 / BBBC038v1)
 
-Para o desenvolvimento das tarefas, utilizamos a **Opção A** (*DSB2018 / BBBC038v1* - microscopia de núcleos celulares).
-
-### 3.1. Arquivos Necessários
-Acesse o portal da base em https://bbbc.broadinstitute.org/BBBC038 e faça o download de:
-1. `stage1_train.zip` (82.9 MB): Conjunto que contém tanto as imagens de microscopia quanto as máscaras individuais de cada núcleo.
-2. `metadata.xlsx` (20 KB): Tabela de metadados utilizada para orientar o split estratificado por modalidade de microscopia.
-
-Nota: Os arquivos `stage1_test.zip` e `stage2_test_final.zip` não são necessários.
-
-### 3.2. Estrutura de Diretórios
-Descompacte os dados locais para manter a seguinte árvore dentro do projeto:
-
-```bash
-data/
-├── raw/
-│   ├── metadata.xlsx
-│   └── stage1_train/
-│       ├── <ImageId_1>/
-│       │   ├── images/
-│       │   │   └── <ImageId_1>.png
-│       │   └── masks/
-│       │       ├── <MaskHash_1>.png
-│       │       ├── <MaskHash_2>.png
-│       │       └── ...
-│       └── <ImageId_N>/
-└── synthetic/
-```
-
-### 3.3. Download e Extração via Terminal
-
-Via Kaggle CLI:
-```bash
-kaggle competitions download -c data-science-bowl-2018 -f stage1_train.zip
-mkdir -p data/raw/stage1_train
-unzip stage1_train.zip -d data/raw/stage1_train
-rm stage1_train.zip
-```
-
-Via download manual [Broad Institute](https://bbbc.broadinstitute.org/BBBC038):
+1. Baixe o `stage1_train.zip` (82.9 MB) e `metadata.xlsx` do [Broad Institute](https://bbbc.broadinstitute.org/BBBC038).
+2. Extraia os dados mantendo a estrutura:
 ```bash
 mkdir -p data/raw/stage1_train
 unzip stage1_train.zip -d data/raw/stage1_train
-mv metadata.xlsx data/raw/
-rm stage1_train.zip
+mv metadata.xlsx data/raw/ && rm stage1_train.zip
 ```
-
-### 3.4. Estratificação e Splits
-
-Conforme estabelecido nas especificações do trabalho, a separação entre treino, validação e teste é realizada de forma estratificada considerando a modalidade e condições experimentais descritas no `metadata.xlsx`. O pipeline de dados salva os índices das partições em disco para garantir reproducibilidade exata de todas as curvas e métricas.
+*Os splits estratificados por modalidade estão salvos em `data/splits.json`.*
 
 ---
 
 ## 4. Execução Rápida
- 
-### 4.1. Teste de Sanidade Sintético (Parte 0)
-Treinamento rápido na base sintética com 500 imagens procedurais:
+
+### 4.1. Comandos Principais (Edital)
+
+- **Treinamento do Modelo Final Oficial (Parte 2 — Trilha A Watershed):**
+  ```bash
+  python train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out_channels 3 --loss weighted_ce_3c --class_weights auto --out runs/part2_watershed --checkpoint checkpoints/part2_watershed.pth
+  ```
+
+- **Avaliação Oficial em Lote (Hungarian Matching mAP@[.50:.95]):**
+  ```bash
+  python evaluate.py --checkpoint checkpoints/part2_watershed.pth --dataset dsb2018 --split val --matching hungarian --output-dir outputs/part2_eval
+  ```
+
+### 4.2. Comandos Adicionais para Reprodução
+
 ```bash
+# Parte 0 (Sanidade Sintética, <5 min, IoU > 0.99)
 python train.py --dataset synthetic --epochs 10 --num_samples 500 --batch_size 16 --out runs/part0_synthetic --checkpoint checkpoints/part0_synthetic.pth
-```
- 
-### 4.2. Treinamento do Baseline Semântico (Parte 1)
-Treinamento da U-Net (ResNet34) na base real DSB2018 com BCE balanceada + Soft Dice:
-```bash
+
+# Parte 1 (Baseline Semântico Binário)
 python train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out runs/part1_baseline --checkpoint checkpoints/part1_baseline.pth
-```
- 
-### 4.3. Treinamento da Cabeça de Instâncias (Parte 2 — Trilha A Watershed)
-Treinamento da U-Net 3-canais com Weighted Cross-Entropy para desacoplamento de fronteiras celulares:
-```bash
-python train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out_channels 3 --loss weighted_ce_3c --class_weights auto --out runs/part2_watershed --checkpoint checkpoints/part2_watershed.pth
-```
 
-### 4.4. Avaliação Comparativa em Lote
-Avaliação com matching Hungarian IoU para cálculo de mAP@[.50:.95], contagem e geração de diagnósticos:
-```bash
-# Avaliar Baseline da Parte 1 (Componentes Conexos)
-python evaluate.py --checkpoint checkpoints/part1_baseline.pth --dataset dsb2018 --split val --matching hungarian --output-dir outputs/part1_eval
+# Parte 3 (Ablações dos Eixos 1 e 2)
+bash scripts/run_eixo1.sh && python scripts/summarize_eixo1.py
+bash scripts/run_eixo2.sh && python scripts/summarize_eixo2.py
 
-# Avaliar Trilha A da Parte 2 (Watershed)
-python evaluate.py --checkpoint checkpoints/part2_watershed.pth --dataset dsb2018 --split val --matching hungarian --output-dir outputs/part2_eval
-```
+# Parte 4 (Mosaico & Costura com Union-Find)
+python scripts/run_mosaic_demo.py --checkpoint checkpoints/part2_watershed.pth
 
-### 4.5. Execução das Ablações Sistemáticas (Parte 3 — Eixos 1 e 2)
-
-O pipeline de ablações executa 2 seeds por configuração com pesos padronizados:
-
-```bash
-# Eixo 1: Recuperação de Resolução (U-Net Skips vs. Gargalo vs. DeepLabv3 ASPP)
-PA1_CLASS_WEIGHTS="1.0,2.877,5.731" bash scripts/run_eixo1.sh
-python scripts/summarize_eixo1.py
-
-# Eixo 2: Funções de Perda e Fator γ (CE Ponderada vs. Focal γ=0, 1, 2, 5)
-bash scripts/run_eixo2.sh
-python scripts/summarize_eixo2.py
-```
-
-Tabelas consolidadas (média ± desvio e por seed), cálculo de campo receptivo teórico e curvas comparativas estão disponíveis diretamente em [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb) e salvos em `outputs/part3_eixo1/` e `outputs/part3_eixo2/`.
-
-### 4.6. Inferência em Mosaico com Fusão de Instâncias (Parte 4)
-
-Compara o tiling ingênuo (center-crop e direct-stamp) com a costura via Hungarian matching local e Union-Find:
-
-```bash
-python scripts/run_mosaic_demo.py \
-  --checkpoint checkpoints/part2_watershed.pth \
-  --tile_size 256 \
-  --stride 128 \
-  --iou_overlap_threshold 0.20 \
-  --output_dir outputs/part4_mosaic
-```
-
-Demonstração interativa, tabela quantitativa antes vs. depois e diagnósticos visuais de reconciliação de bordas estão disponíveis em [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb).
-
-### 4.7. Galeria de Falhas, Campo Receptivo e Correção Adaptativa (Parte 5)
-
-Executa o mapeamento sistemático dos 5 casos críticos de falha, extrai a distribuição morfológica dos 29.461 núcleos celulares vs. o campo receptivo teórico do encoder ($RF = 899\text{ px}$) e demonstra a recuperação por consolidação morfológica de sementes (`seed_closing_radius=4`):
-
-```bash
+# Parte 5 (Galeria de Falhas, Campo Receptivo e Correção Adaptativa)
 python scripts/run_failure_gallery.py
+
+# Parte 6 (Teste de Estresse de Escala 0.5x e 2.0x)
+python scripts/run_scale_stress.py --unet-checkpoint checkpoints/part2_watershed.pth --aspp-checkpoint checkpoints/part3_eixo1/deeplab_aspp_seed42.pth
 ```
-
-O script gera os painéis diagnósticos de 4 vistas em `outputs/part5_gallery/failure_case_[1-5].png`, a curva de distribuição empírica em `outputs/part5_gallery/nuclei_size_distribution.png`, a evidência Antes vs. Depois em `outputs/part5_gallery/correction_before_after.png` e as métricas consolidadas em `outputs/part5_gallery/gallery_metrics.json`.
-
-### 4.8. Teste de Estresse por Mudança de Escala (Parte 6 — Opção 3)
-
-Compara a U-Net com Watershed e o DeepLab/ASPP autoral sob fatores de escala de $0{,}5\times$, $1{,}0\times$ e $2{,}0\times$:
-
-```bash
-python scripts/run_scale_stress.py \
-  --unet-checkpoint checkpoints/part2_watershed.pth \
-  --aspp-checkpoint checkpoints/part3_eixo1/deeplab_aspp_seed42.pth \
-  --output-dir outputs/part6_stress
-```
-
-O script exporta mAP@[.50:.95], AP50, AP75, erro de contagem, retenção relativa e as curvas de degradação e painel visual comparativo em `outputs/part6_stress/`.
 
 ---
 
-## 5. Notebook de Inferência e Checkpoints
+## 5. Inferência Arbitrária e Checkpoints
 
-- **Inferência direta:** O notebook [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb) atua como a vitrine técnica central do projeto. Ele implementa a função `predict_instances(image_path, model)` atendendo integralmente ao requisito oficial do edital (*"recebe o caminho de uma imagem qualquer, devolve a máscara de instâncias colorida e a contagem. Roda sem retreinar"*). Por padrão, carrega o modelo oficial da Parte 2 (`checkpoints/part2_watershed.pth`), executando a decodificação Watershed instantaneamente na GPU/CPU.
-- **Checkpoints dos Modelos Treinados:**
-  Conforme estabelecido nas instruções de entrega (*"Pesos do modelo final (.pth) (link se for grande)"*), os checkpoints possuem ~99 MB cada e estão hospedados na [Release v1.0.0](https://github.com/riqueu/dl-pa1-2026/releases/tag/v1.0.0) do GitHub:
-  - [Download `part2_watershed.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part2_watershed.pth): Modelo oficial da Parte 2 com cabeça Watershed ($mAP = 0.5157$).
-  - [Download `part1_baseline.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part1_baseline.pth): Baseline semântico binário da Parte 1 ($mAP = 0.4820$).
-  - [Download `part0_synthetic.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part0_synthetic.pth): U-Net de teste de sanidade sintético ($IoU > 0.99$).
+- **Notebook de Inferência:** [`notebooks/inferencia.ipynb`](notebooks/inferencia.ipynb) atua como vitrine técnica do projeto. Contém a função `predict_instances(image_path, model)` que recebe uma imagem qualquer e retorna a máscara colorida e a contagem sem retreinar.
+- **Checkpoints Oficiais:** Os pesos estão disponíveis para download na [Release v1.0.0](https://github.com/riqueu/dl-pa1-2026/releases/tag/v1.0.0):
+  - [Download `part2_watershed.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part2_watershed.pth): Modelo final oficial ($mAP = 0.5157$).
+  - [Download `part1_baseline.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part1_baseline.pth): Baseline semântico binário ($mAP = 0.4820$).
+  - [Download `part0_synthetic.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part0_synthetic.pth): Teste de sanidade sintético ($IoU > 0.99$).
 
-Para baixar o modelo oficial diretamente via linha de comando:
+Download rápido via terminal:
 ```bash
 wget -P checkpoints/ https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part2_watershed.pth
 ```
 
+---
 
-## 6. Registro de Uso de Inteligência Artificial
+## 6. Registro de IA e Planejamento
 
-Em conformidade com as diretrizes do assignment, os detalhes sobre como ferramentas de IA foram integradas durante o desenvolvimento do código, documentação e resolução de problemas estão documentados no arquivo [AI_LOG.md](AI_LOG.md).
+- [AI_LOG.md](AI_LOG.md): Registro sucinto de uso de IA (5 episódios temáticos).
+- [docs/](docs/): Roteiros de divisão de tarefas e contratos de interface entre a dupla.
