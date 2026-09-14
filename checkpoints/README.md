@@ -2,7 +2,7 @@
 
 Conforme especificado no edital do PA1 (*"Pesos do modelo final (.pth) (link se for grande)"*), os arquivos de pesos possuem cerca de 99 MB cada e não são comitados diretamente no histórico do Git para evitar sobrecarregar o repositório.
 
-## Os 3 Checkpoints Oficiais do Projeto
+## Checkpoints oficiais e dependência experimental
 
 Temos exatamente **3 modelos pré-treinados**, um para cada fase inicial do trabalho:
 
@@ -21,6 +21,13 @@ Temos exatamente **3 modelos pré-treinados**, um para cada fase inicial do trab
    - Desempenho: mAP@[.50:.95] = 0.5157 | AP50 = 0.7165 | Erro médio de contagem: 7.40 núcleos/img.
    - Link: [Download `part2_watershed.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part2_watershed.pth)
    - *Nota:* Este é o **modelo final oficial** utilizado como motor nas Partes 4 (Mosaico), 5 (Galeria de Falhas) e 6 (Teste de Estresse).
+
+A Parte 6 também depende do checkpoint experimental
+`checkpoints/part3_eixo1/deeplab_aspp_seed42.pth`, produzido pela configuração
+`deeplab_aspp`, seed 42, do Eixo 1. Esse peso não está neste checkout nem entre
+os três assets atuais da Release v1.0.0. Para reproduzir os resultados finais,
+é necessário recuperar exatamente o arquivo da máquina que executou o teste ou
+publicá-lo como asset adicional; pesos de outra execução não são equivalentes.
 
 ## Download via Linha de Comando
 

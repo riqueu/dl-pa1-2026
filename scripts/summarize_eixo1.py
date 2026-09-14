@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from statistics import mean, stdev
@@ -12,14 +13,23 @@ import numpy as np
 CONFIGS = [
     ("unet_skips", "U-Net Padrão (Skips)", "#1f77b4"),
     ("unet_noskips", "U-Net Sem Skips (Gargalo)", "#d62728"),
-    ("deeplab_aspp", "DeepLabv3 (Atrous + ASPP)", "#2ca02c"),
+    (
+        "deeplab_aspp",
+        "Cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3",
+        "#2ca02c",
+    ),
 ]
 SEEDS = (42, 123)
-OUTPUT_ROOT = Path("outputs/part3_eixo1")
 
 
-def load_metrics(config: str, seed: int) -> Dict[str, Any]:
-    path = OUTPUT_ROOT / f"{config}_seed{seed}" / "metrics_dsb2018_val_hungarian.json"
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Consolida resultados do Eixo 1.")
+    parser.add_argument("--output-root", type=Path, default=Path("outputs/part3_eixo1"))
+    return parser.parse_args()
+
+
+def load_metrics(output_root: Path, config: str, seed: int) -> Dict[str, Any]:
+    path = output_root / f"{config}_seed{seed}" / "metrics_dsb2018_val_hungarian.json"
     if not path.exists():
         raise FileNotFoundError(f"Métricas ausentes: {path}")
     with path.open(encoding="utf-8") as stream:
@@ -34,6 +44,8 @@ def summarize(values: List[float]) -> Dict[str, float]:
 
 
 def main() -> None:
+    args = parse_args()
+    output_root = args.output_root
     summary: Dict[str, Any] = {
         "seeds": list(SEEDS),
         "std_definition": "desvio-padrão amostral entre seeds",
@@ -43,7 +55,7 @@ def main() -> None:
     table_rows = []
 
     for config_key, label, color in CONFIGS:
-        records = [load_metrics(config_key, seed) for seed in SEEDS]
+        records = [load_metrics(output_root, config_key, seed) for seed in SEEDS]
         map_summary = summarize([record["mean_mAP"] for record in records])
         cnt_summary = summarize([record["mean_count_error"] for record in records])
         iou_summary = summarize([record["mean_semantic_iou"] for record in records])
@@ -80,24 +92,29 @@ def main() -> None:
             "dice_std": dice_summary["std"],
         })
 
-    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    destination = OUTPUT_ROOT / "summary.json"
+    output_root.mkdir(parents=True, exist_ok=True)
+    destination = output_root / "summary.json"
     with destination.open("w", encoding="utf-8") as stream:
         json.dump(summary, stream, indent=2, ensure_ascii=False)
     print(f"Resumo salvo em {destination}")
 
     # Tabela formatada no terminal
-    print("\n" + "=" * 90)
-    print(f"{'Arquitetura':<28} | {'mAP@[.50:.95]':<18} | {'Erro Contagem':<16} | {'IoU Semântico':<16}")
-    print("-" * 90)
+    print("\n" + "=" * 125)
+    print(f"{'Arquitetura':<58} | {'mAP@[.50:.95]':<18} | {'Erro Contagem':<16} | {'IoU Semântico':<16}")
+    print("-" * 125)
     for row in table_rows:
-        print(f"{row['label']:<28} | {row['mAP_mean']:.4f} ± {row['mAP_std']:.4f}   | {row['cnt_mean']:.2f} ± {row['cnt_std']:.2f}     | {row['iou_mean']:.4f} ± {row['iou_std']:.4f}")
-    print("=" * 90 + "\n")
+        print(f"{row['label']:<58} | {row['mAP_mean']:.4f} ± {row['mAP_std']:.4f}   | {row['cnt_mean']:.2f} ± {row['cnt_std']:.2f}     | {row['iou_mean']:.4f} ± {row['iou_std']:.4f}")
+    print("=" * 125 + "\n")
 
     # Gráficos comparativos
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5), dpi=150)
 
-    labels = [r["label"] for r in table_rows]
+    plot_label_by_key = {
+        "unet_skips": "U-Net\n(com skips)",
+        "unet_noskips": "U-Net\n(sem skips)",
+        "deeplab_aspp": "Cabeça DeepLab/ASPP autoral\n(inspirada no DeepLabv3)",
+    }
+    labels = [plot_label_by_key[r["key"]] for r in table_rows]
     maps = [r["mAP_mean"] for r in table_rows]
     map_errs = [r["mAP_std"] for r in table_rows]
     colors = [r["color"] for r in table_rows]
@@ -126,7 +143,7 @@ def main() -> None:
         ax2.text(bar.get_x() + bar.get_width() / 2.0, yval + 0.2, f"{c:.2f}", ha="center", va="bottom", fontsize=10, fontweight="bold")
 
     plt.tight_layout()
-    plot_path = OUTPUT_ROOT / "architecture_ablation.png"
+    plot_path = output_root / "architecture_ablation.png"
     plt.savefig(plot_path, bbox_inches="tight", dpi=180)
     plt.close(fig)
     print(f"Gráfico comparativo salvo em: {plot_path}")

@@ -21,8 +21,8 @@ O projeto desenvolve uma solução autoral de segmentação de instâncias basea
 | *Caso Denso (369 núcleos)* | *Watershed Desacoplado* | *vs. Fusão por Componentes Conexos* | **0.3374** | **+19.31 pp** | **47** *(vs. 174)* |
 | **Parte 3: Ablações** | U-Net com Skip Connections | vs. Gargalo Cego / ASPP | **0.4901** | **+27.29 pp** *(vs. Gargalo)* | **5.99 núcleos/img** |
 | **Parte 4: Mosaico** | Costura de Instâncias (Union-Find) | vs. Tiling Ingênuo (sem fusão) | **0.4413** | **+5.15 pp** | **+4** *(vs. +33 duplicadas)* |
-| **Parte 5: Correção** | Watershed Adaptativo (fechamento $r=4$) | vs. Watershed Padrão (hiper-fragmentado) | **0.2518** | **+17.78 pp** | **0** *(exato, vs. +52)* |
-| **Parte 6: Estresse (0.5×)** | U-Net ResNet-34 (multiescala) | vs. DeepLabv3 ASPP (dilatação fixa) | **0.3446** | **+32.70 pp** *(ASPP = 0.0176)* | **11.12** *(vs. 37.40)* |
+| **Parte 5: Correção** | Watershed calibrado para o Caso 2 (fechamento $r=4$) | vs. Watershed Padrão (hiperfragmentado) | **0.2518** | **+17.78 pp** | **0** *(contagem exata; máscaras ainda imperfeitas)* |
+| **Parte 6: Estresse (0.5×)** | U-Net ResNet-34 avaliada em múltiplas escalas | vs. cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3 | **0.3446** | **+32.70 pp** *(ASPP = 0.0176)* | **11.12** *(vs. 37.40)* |
 
 *\*Na Parte 0, a métrica oficial exigida é o IoU semântico binário nos dados procedurais com convergência em menos de 5 minutos.*
 
@@ -32,7 +32,7 @@ O projeto desenvolve uma solução autoral de segmentação de instâncias basea
 
 Python 3.10+ em ambiente virtual:
 ```bash
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -70,24 +70,35 @@ mv metadata.xlsx data/raw/ && rm stage1_train.zip
 
 ```bash
 # Parte 0 (Sanidade Sintética, <5 min, IoU > 0.99)
-python train.py --dataset synthetic --epochs 10 --num_samples 500 --batch_size 16 --out runs/part0_synthetic --checkpoint checkpoints/part0_synthetic.pth
+python3 train.py --dataset synthetic --epochs 10 --num_samples 500 --batch_size 16 --out runs/part0_synthetic --checkpoint checkpoints/part0_synthetic.pth
 
 # Parte 1 (Baseline Semântico Binário)
-python train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out runs/part1_baseline --checkpoint checkpoints/part1_baseline.pth
+python3 train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out runs/part1_baseline --checkpoint checkpoints/part1_baseline.pth
 
-# Parte 3 (Ablações dos Eixos 1 e 2)
-bash scripts/run_eixo1.sh && python scripts/summarize_eixo1.py
-bash scripts/run_eixo2.sh && python scripts/summarize_eixo2.py
+# Parte 3, Eixo 1 (pesos fixos calculados no split de treino)
+# Novos logs e avaliações vão para scratch/; resultados versionados não são sobrescritos.
+PA1_CLASS_WEIGHTS="1.0,2.877,5.731" bash scripts/run_eixo1.sh
+
+# Parte 3, Eixo 2 (o runner também consolida as duas seeds)
+python3 scripts/run_eixo2.py
+
+# Nos dois eixos, média ± desvio usa o desvio-padrão amostral entre seeds (ddof=1).
 
 # Parte 4 (Mosaico & Costura com Union-Find)
-python scripts/run_mosaic_demo.py --checkpoint checkpoints/part2_watershed.pth
+python3 scripts/run_mosaic_demo.py --checkpoint checkpoints/part2_watershed.pth
 
-# Parte 5 (Galeria de Falhas, Campo Receptivo e Correção Adaptativa)
-python scripts/run_failure_gallery.py
+# Parte 5 (Galeria, Campo Receptivo e Correção Calibrada para o Caso 2)
+python3 scripts/run_failure_gallery.py
 
 # Parte 6 (Teste de Estresse de Escala 0.5x e 2.0x)
-python scripts/run_scale_stress.py --unet-checkpoint checkpoints/part2_watershed.pth --aspp-checkpoint checkpoints/part3_eixo1/deeplab_aspp_seed42.pth
+python3 scripts/run_scale_stress.py --unet-checkpoint checkpoints/part2_watershed.pth --aspp-checkpoint checkpoints/part3_eixo1/deeplab_aspp_seed42.pth
 ```
+
+O checkpoint ASPP da Parte 6 é produzido pelo Eixo 1, na configuração
+`deeplab_aspp` com seed 42. Ele não está versionado e ainda não consta na
+Release v1.0.0. Para reproduzir a Parte 6, recupere exatamente o arquivo da
+máquina que executou o experimento ou publique-o como asset da Release; não o
+substitua por pesos de outra execução, mesmo que tenham a mesma arquitetura.
 
 ---
 
@@ -110,3 +121,17 @@ wget -P checkpoints/ https://github.com/riqueu/dl-pa1-2026/releases/download/v1.
 
 - [AI_LOG.md](AI_LOG.md): Registro sucinto de uso de IA (5 episódios temáticos).
 - [docs/](docs/): Roteiros de divisão de tarefas e contratos de interface entre a dupla.
+
+## 7. Comandos mínimos da entrega
+
+Treinar:
+
+```bash
+python3 train.py --dataset dsb2018 --epochs 15 --batch_size 8 --lr 1e-3 --out_channels 3 --loss weighted_ce_3c --class_weights auto --out runs/part2_watershed --checkpoint checkpoints/part2_watershed.pth
+```
+
+Avaliar:
+
+```bash
+python3 evaluate.py --checkpoint checkpoints/part2_watershed.pth --dataset dsb2018 --split val --matching hungarian --output-dir outputs/part2_eval
+```

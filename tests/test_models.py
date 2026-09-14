@@ -61,12 +61,17 @@ class ModelArchitectureTests(unittest.TestCase):
 
     def test_campo_receptivo_reflete_dilatacao(self) -> None:
         standard = resnet34_receptive_field_summary(output_stride=32)
+        os16_without_atrous = resnet34_receptive_field_summary(
+            output_stride=16,
+            dilate_layer4=False,
+        )
         atrous = resnet34_receptive_field_summary(output_stride=16)
         self.assertEqual(standard["encoder_jump"], 32)
+        self.assertEqual(os16_without_atrous["encoder_jump"], 16)
         self.assertEqual(atrous["encoder_jump"], 16)
         self.assertGreater(
             atrous["encoder_receptive_field"],
-            standard["encoder_receptive_field"],
+            os16_without_atrous["encoder_receptive_field"],
         )
         self.assertGreater(
             atrous["aspp_branch_receptive_fields"]["conv_3x3_rate_18"],

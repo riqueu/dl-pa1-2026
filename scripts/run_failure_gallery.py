@@ -1,10 +1,10 @@
-"""Pipeline autônomo da Parte 5: Galeria de Falhas, Campo Receptivo e Correção Adaptativa.
+"""Pipeline autônomo da Parte 5: galeria, campo receptivo e correção calibrada.
 
 Este script atende a todos os requisitos do edital (PA1.pdf) e do documento docs/parte5.md:
 1. Mapeia e seleciona os 5 casos de falha mais expressivos e diversificados no split de validação.
 2. Gera painéis de 4 imagens em alta resolução com imagem, GT, predição e mapas de probabilidade intermediários.
-3. Computa a distribuição empírica do tamanho e diâmetro de todos os núcleos do DSB2018 (29.461 núcleos).
-4. Compara com o campo receptivo teórico do encoder ResNet-34 (899 px) e dos ramos ASPP (931 a 1507 px).
+3. Computa os diâmetros após redimensionar cada máscara para a entrada 256x256.
+4. Compara variantes OS16 com e sem atrous na mesma resolução de saída.
 5. Implementa a correção via consolidação morfológica de marcadores no Watershed, gerando o painel Antes vs. Depois.
 6. Exporta todas as métricas consolidadas para outputs/part5_gallery/gallery_metrics.json.
 """
@@ -36,24 +36,45 @@ from src.utils import (
 
 def compute_dataset_nuclei_distribution(
     root_dir: str = "data/raw/stage1_train",
+    target_size: Tuple[int, int] = (256, 256),
 ) -> Dict[str, Any]:
-    """Extrai áreas e diâmetros equivalentes de todas as máscaras individuais do dataset."""
+    """Mede os núcleos na mesma escala espacial recebida pela rede.
+
+    Cada máscara individual é redimensionada por vizinho mais próximo para
+    ``target_size`` antes da contagem de área. Assim, os diâmetros e o campo
+    receptivo são expressos no mesmo sistema de coordenadas (entrada 256x256).
+    """
     train_dirs = sorted(glob.glob(os.path.join(root_dir, "*")))
     areas: List[float] = []
+    source_nuclei = 0
+    target_height, target_width = target_size
 
     for d in train_dirs:
         mask_files = glob.glob(os.path.join(d, "masks", "*.png"))
         for mf in mask_files:
             m = cv2.imread(mf, cv2.IMREAD_GRAYSCALE)
             if m is not None:
-                a = float((m > 0).sum())
-                if a > 0:
-                    areas.append(a)
+                binary = (m > 0).astype(np.uint8)
+                if binary.sum() == 0:
+                    continue
+                source_nuclei += 1
+                resized = cv2.resize(
+                    binary,
+                    (target_width, target_height),
+                    interpolation=cv2.INTER_NEAREST,
+                )
+                a = float(resized.sum())
+                areas.append(a)
 
     areas_np = np.array(areas, dtype=np.float32)
+    if areas_np.size == 0:
+        raise RuntimeError(f"Nenhuma máscara válida encontrada em {root_dir}.")
     diameters_np = 2.0 * np.sqrt(areas_np / np.pi)
 
     return {
+        "analysis_resolution": [target_height, target_width],
+        "source_nuclei": source_nuclei,
+        "collapsed_after_resize": int((areas_np == 0).sum()),
         "total_nuclei": int(len(areas_np)),
         "total_images": int(len(train_dirs)),
         "areas": areas_np,
@@ -72,14 +93,16 @@ def compute_dataset_nuclei_distribution(
 
 def plot_receptive_field_vs_nuclei(
     stats: Dict[str, Any],
-    rf_summary_os32: Dict[str, Any],
-    rf_summary_os16: Dict[str, Any],
+    rf_os16_without_atrous: Dict[str, Any],
+    rf_os16_atrous: Dict[str, Any],
     save_path: str,
 ) -> None:
     """Gera a figura de comparação do Campo Receptivo Teórico com a distribuição empírica dos núcleos."""
     diameters = stats["diameters"]
-    encoder_rf = rf_summary_os32["encoder_receptive_field"]  # 899 px
-    aspp_rfs = rf_summary_os16["aspp_branch_receptive_fields"]
+    rf_without_atrous = rf_os16_without_atrous["encoder_receptive_field"]
+    rf_with_atrous = rf_os16_atrous["encoder_receptive_field"]
+    aspp_rfs = rf_os16_atrous["aspp_branch_receptive_fields"]
+    input_size = int(stats["analysis_resolution"][0])
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
 
@@ -93,7 +116,7 @@ def plot_receptive_field_vs_nuclei(
         color="#3b82f6",
         edgecolor="black",
         alpha=0.75,
-        label="Densidade Empírica (DSB2018)",
+        label="Densidade empírica após resize para 256x256",
     )
 
     ax1.axvline(stats["diameter_mean"], color="#ef4444", linestyle="--", linewidth=2.5,
@@ -107,7 +130,7 @@ def plot_receptive_field_vs_nuclei(
 
     ax1.set_xlabel(r"Diâmetro Equivalente do Núcleo $d = 2\sqrt{A/\pi}$ (pixels)", fontsize=11, fontweight="bold")
     ax1.set_ylabel("Densidade de Probabilidade", fontsize=11, fontweight="bold")
-    ax1.set_title("Distribuição Empírica de Tamanho dos Núcleos Celulares\n(29.461 núcleos anotados)", fontsize=12, fontweight="bold")
+    ax1.set_title("Distribuição de tamanho na escala de entrada da rede\n(máscaras redimensionadas para 256x256)", fontsize=12, fontweight="bold")
     ax1.grid(True, linestyle=":", alpha=0.6)
     ax1.legend(loc="upper right", framealpha=0.95)
 
@@ -118,7 +141,8 @@ def plot_receptive_field_vs_nuclei(
         "Percentil 95",
         "Núcleo Máximo",
         "Entrada da Rede\n(Tile 256x256)",
-        "RF Encoder\nResNet-34 (OS32)",
+        "RF Encoder sem atrous\n(OS16)",
+        "RF Encoder com atrous\n(OS16)",
         "RF ASPP (Rate 6)\n(OS16)",
         "RF ASPP (Rate 12)\n(OS16)",
         "RF ASPP (Rate 18)\n(OS16)",
@@ -127,8 +151,9 @@ def plot_receptive_field_vs_nuclei(
         stats["diameter_mean"],
         stats["diameter_p95"],
         stats["diameter_max"],
-        256.0,
-        encoder_rf,
+        float(input_size),
+        rf_without_atrous,
+        rf_with_atrous,
         aspp_rfs["conv_3x3_rate_6"],
         aspp_rfs["conv_3x3_rate_12"],
         aspp_rfs["conv_3x3_rate_18"],
@@ -139,6 +164,7 @@ def plot_receptive_field_vs_nuclei(
         "#8b5cf6",
         "#6b7280",
         "#ef4444",
+        "#f97316",
         "#ec4899",
         "#db2777",
         "#9d174d",
@@ -146,8 +172,15 @@ def plot_receptive_field_vs_nuclei(
 
     bars = ax2.barh(categories, values, color=colors, edgecolor="black", alpha=0.85)
     ax2.set_xlabel("Dimensão Espacial em Pixels (Escala Linear)", fontsize=11, fontweight="bold")
-    ax2.set_title("Tamanho dos Núcleos vs. Campo Receptivo Teórico\n($RF_{\\text{encoder}} \\gg d_{\\text{núcleo}}$)", fontsize=12, fontweight="bold")
+    ax2.set_title("Campo receptivo teórico em OS16\n(comparação na mesma resolução de saída)", fontsize=12, fontweight="bold")
     ax2.grid(True, linestyle=":", alpha=0.6, axis="x")
+    ax2.axvline(
+        input_size,
+        color="#111827",
+        linestyle="--",
+        linewidth=1.8,
+        label="Limite do contexto disponível na entrada",
+    )
 
     for bar, val in zip(bars, values):
         ax2.text(
@@ -161,6 +194,15 @@ def plot_receptive_field_vs_nuclei(
         )
 
     ax2.set_xlim(0, max(values) * 1.15)
+    ax2.legend(loc="lower right", framealpha=0.95)
+    fig.text(
+        0.74,
+        0.01,
+        "RF teórico pode exceder 256 px, mas o contexto real é limitado pela entrada; "
+        "o RF efetivo aprendido pode ser menor.",
+        ha="center",
+        fontsize=9,
+    )
     plt.tight_layout()
     plt.savefig(save_path, dpi=180, bbox_inches="tight")
     plt.close()
@@ -249,7 +291,7 @@ def generate_before_after_figure(
     meta_after: Dict[str, Any],
     save_path: str,
 ) -> None:
-    """Gera painel visual Antes vs. Depois da correção adaptativa."""
+    """Gera painel Antes vs. Depois da correção calibrada para o Caso 2."""
     fig, axes = plt.subplots(1, 4, figsize=(18, 5.2))
 
     # 1. Imagem Original
@@ -275,11 +317,11 @@ def generate_before_after_figure(
     )
     axes[2].axis("off")
 
-    # 4. Depois da Correção (Watershed Adaptativo com Consolidação Morfológica de Sementes)
+    # 4. Depois da correção calibrada para este caso específico
     after_colored = colorize_instances(pred_after, seed=42)
     axes[3].imshow(after_colored)
     axes[3].set_title(
-        f"4. DEPOIS: Watershed Adaptativo\n$N_{{pred}} = {meta_after['n_pred']}$ (Erro: {meta_after['count_error']})\nmAP: {meta_after['mAP']:.4f} (+{meta_after['mAP']-meta_before['mAP']:.4f})\nAP50: {meta_after['ap50']:.4f} (+{meta_after['ap50']-meta_before['ap50']:.4f})",
+        f"4. DEPOIS: Correção Calibrada (Caso 2)\n$N_{{pred}} = {meta_after['n_pred']}$ (Erro: {meta_after['count_error']})\nmAP: {meta_after['mAP']:.4f} (+{meta_after['mAP']-meta_before['mAP']:.4f})\nAP50: {meta_after['ap50']:.4f} (+{meta_after['ap50']-meta_before['ap50']:.4f})",
         fontsize=10.5,
         fontweight="bold",
         color="#16a34a",
@@ -287,7 +329,8 @@ def generate_before_after_figure(
     axes[3].axis("off")
 
     plt.suptitle(
-        "Recuperação de Falha Crítica: Consolidação Morfológica de Marcadores no Watershed\nEliminação de super-segmentação causada por variações de textura e cromatina interna",
+        "Correção Morfológica Calibrada para o Caso 2\n"
+        "Contagem exata não implica máscaras perfeitas: o mAP residual quantifica os erros de forma e matching",
         fontsize=12,
         fontweight="bold",
         y=1.03,
@@ -304,7 +347,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print("=" * 70)
-    print("PARTE 5: GALERIA DE FALHAS, CAMPO RECEPTIVO E CORREÇÃO ADAPTATIVA")
+    print("PARTE 5: GALERIA DE FALHAS, CAMPO RECEPTIVO E CORREÇÃO CALIBRADA")
     print(f"Dispositivo: {device} | Diretório de Saída: {output_dir}")
     print("=" * 70)
 
@@ -432,30 +475,34 @@ def main() -> None:
         })
 
     # 5. Levantamento Estatístico de Todos os Núcleos e Campo Receptivo
-    print("\nComputando distribuição empírica de 29.461 núcleos do DSB2018...")
-    nuclei_stats = compute_dataset_nuclei_distribution()
+    print("\nComputando distribuição dos núcleos na escala de entrada 256x256...")
+    nuclei_stats = compute_dataset_nuclei_distribution(target_size=(256, 256))
     print(f"Total de núcleos analisados: {nuclei_stats['total_nuclei']}")
     print(f"Diâmetro médio: {nuclei_stats['diameter_mean']:.2f} px | Mediana: {nuclei_stats['diameter_median']:.2f} px")
     print(f"Percentil 95: {nuclei_stats['diameter_p95']:.2f} px | Máximo: {nuclei_stats['diameter_max']:.2f} px")
 
     print("\nCalculando Campo Receptivo Teórico do ResNet-34...")
-    rf_os32 = resnet34_receptive_field_summary(output_stride=32)
-    rf_os16 = resnet34_receptive_field_summary(output_stride=16)
-    print(f"Campo Receptivo Encoder (OS32): {rf_os32['encoder_receptive_field']} px")
-    print(f"Campo Receptivo Ramos ASPP (OS16): {rf_os16['aspp_branch_receptive_fields']}")
+    rf_os16_without_atrous = resnet34_receptive_field_summary(
+        output_stride=16,
+        dilate_layer4=False,
+    )
+    rf_os16_atrous = resnet34_receptive_field_summary(output_stride=16)
+    print(f"RF Encoder sem atrous (OS16): {rf_os16_without_atrous['encoder_receptive_field']} px")
+    print(f"RF Encoder com atrous (OS16): {rf_os16_atrous['encoder_receptive_field']} px")
+    print(f"RF Ramos ASPP (OS16): {rf_os16_atrous['aspp_branch_receptive_fields']}")
 
     dist_fig_path = os.path.join(output_dir, "nuclei_size_distribution.png")
     plot_receptive_field_vs_nuclei(
         stats=nuclei_stats,
-        rf_summary_os32=rf_os32,
-        rf_summary_os16=rf_os16,
+        rf_os16_without_atrous=rf_os16_without_atrous,
+        rf_os16_atrous=rf_os16_atrous,
         save_path=dist_fig_path,
     )
     print(f"Salvo: {dist_fig_path}")
 
     # 6. Implementação e Avaliação da Correção (Antes vs. Depois)
     # Selecionamos o Caso 2 (idx=56, Hiper-fragmentação de Células Gigantes)
-    print("\nAplicando Correção Adaptativa no Caso 2 (idx=56)...")
+    print("\nAplicando correção morfológica calibrada no Caso 2 (idx=56)...")
     rec_c2 = all_eval_records[56]
     prob_c2 = rec_c2["prob"]
     gt_c2 = rec_c2["gt_inst"]
@@ -512,6 +559,9 @@ def main() -> None:
         "checkpoint": checkpoint_path,
         "selected_failure_cases": gallery_data_for_json,
         "morphological_distribution": {
+            "analysis_resolution": nuclei_stats["analysis_resolution"],
+            "source_nuclei": nuclei_stats["source_nuclei"],
+            "collapsed_after_resize": nuclei_stats["collapsed_after_resize"],
             "total_nuclei": nuclei_stats["total_nuclei"],
             "total_images": nuclei_stats["total_images"],
             "diameter_mean": round(nuclei_stats["diameter_mean"], 2),
@@ -524,14 +574,21 @@ def main() -> None:
             "diameter_min": round(nuclei_stats["diameter_min"], 2),
         },
         "receptive_field": {
-            "encoder_resnet34_os32": rf_os32["encoder_receptive_field"],
-            "aspp_branch_os16": rf_os16["aspp_branch_receptive_fields"],
-            "ratio_rf_vs_mean_diameter": round(rf_os32["encoder_receptive_field"] / nuclei_stats["diameter_mean"], 1),
-            "ratio_rf_vs_max_diameter": round(rf_os32["encoder_receptive_field"] / nuclei_stats["diameter_max"], 1),
+            "comparison_output_stride": 16,
+            "encoder_without_atrous_os16": rf_os16_without_atrous["encoder_receptive_field"],
+            "encoder_with_atrous_os16": rf_os16_atrous["encoder_receptive_field"],
+            "aspp_branch_os16": rf_os16_atrous["aspp_branch_receptive_fields"],
+            "theoretical_rf_note": "RF teórico; pode incluir padding além da entrada 256x256.",
+            "available_context_note": "O contexto observável é limitado aos 256x256 pixels da entrada.",
+            "effective_rf_note": "O campo receptivo efetivo aprendido tende a ser menor e não foi estimado empiricamente.",
+            "ratio_atrous_rf_vs_mean_diameter": round(rf_os16_atrous["encoder_receptive_field"] / nuclei_stats["diameter_mean"], 1),
+            "ratio_atrous_rf_vs_max_diameter": round(rf_os16_atrous["encoder_receptive_field"] / nuclei_stats["diameter_max"], 1),
         },
         "correction_experiment": {
             "case_evaluated": "Caso 2 (idx=56, ebc18868864ad075)",
-            "technique": "Watershed Adaptativo com Consolidação Morfológica de Sementes (seed_closing_radius=4, min_area=60, interior_threshold=0.40)",
+            "technique": "Correção morfológica calibrada para o Caso 2 (seed_closing_radius=4, min_area=60, interior_threshold=0.40)",
+            "scope_note": "Parâmetros fixos calibrados para este caso; não constituem adaptação automática por imagem.",
+            "interpretation_note": "Erro de contagem zero não implica segmentação perfeita; o mAP após a correção permanece abaixo de 1.",
             "before": meta_before,
             "after": meta_after,
             "relative_gain_mAP_percent": round(((meta_after["mAP"] - meta_before["mAP"]) / meta_before["mAP"]) * 100, 2),

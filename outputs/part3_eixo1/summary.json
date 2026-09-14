@@ -72,7 +72,7 @@
       }
     },
     "deeplab_aspp": {
-      "label": "DeepLabv3 (Atrous + ASPP)",
+      "label": "Cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3",
       "per_seed": {
         "42": {
           "mAP": 0.15826292689356253,

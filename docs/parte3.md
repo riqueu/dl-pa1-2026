@@ -6,7 +6,7 @@ Conforme estipulado no edital:
 > *"Rodem ablações em dois dos eixos abaixo, cada configuração com 2 seeds, reportando média ± desvio: (...)"*
 
 A dupla selecionou formalmente:
-1. **Eixo 1 — Como Recuperar Resolução:** Comparação entre *Skip Connections* (U-Net), *Atrous Convolution + ASPP* (DeepLabv3) e baseline sem skips (*No-Skips*).
+1. **Eixo 1 — Como Recuperar Resolução:** Comparação entre *Skip Connections* (U-Net), cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3, e baseline sem skips (*No-Skips*).
 2. **Eixo 2 — A Função de Perda:** Avaliação do desbalanceamento severo da classe fronteira ($2.8\%$) variando $\text{CE Ponderada}$ vs. $\text{Focal Loss}$ com $\gamma \in \{0, 1, 2, 5\}$.
 
 ---
@@ -84,7 +84,7 @@ A divisão mantém isolamento absoluto de arquivos para trabalho simultâneo em 
 
 ### 2.2. Membro B (Henrique) — Eixo 2 (Funções de Perda & Fator $\gamma$)
 * **Branch:** `feature/part3-eixo2-losses`
-* **Arquivos:** `scripts/run_eixo2.sh` (ou Python runner), `outputs/part3_eixo2/`
+* **Arquivos:** `scripts/run_eixo2.py`, `outputs/part3_eixo2/`
 * **Passo a Passo:**
   1. **Automatizar as 10 corridas da grade de perdas:**
      * `CE Ponderada`: `--loss weighted_ce_3c --class_weights auto` (seeds 42, 123)
@@ -142,8 +142,16 @@ Os seis treinos devem usar os mesmos pesos de classe explícitos. Depois de os
 pesos serem calculados uma única vez no split de treino, a grade é iniciada por:
 
 ```bash
-PA1_CLASS_WEIGHTS="w_fundo,w_interior,w_fronteira" bash scripts/run_eixo1.sh
+PA1_CLASS_WEIGHTS="1.0,2.877,5.731" bash scripts/run_eixo1.sh
 ```
 
-O script recusa sobrescrever qualquer execução existente e gera
-`outputs/part3_eixo1/summary.json` com média e desvio-padrão amostral das seeds.
+Esses são os pesos fixos calculados no split de treino e usados nas seis
+execuções originais. Por padrão, novas execuções salvam logs e avaliações em
+`scratch/part3_eixo1/`, preservando os artefatos versionados; os checkpoints
+continuam em `checkpoints/part3_eixo1/`, caminho consumido pela Parte 6.
+
+O script reutiliza checkpoints e avaliações completas, mas recusa sobrescrever
+diretórios parciais. Por padrão, gera o resumo em
+`scratch/part3_eixo1/outputs/summary.json`. O Eixo 2 usa a mesma definição de
+desvio-padrão amostral entre seeds (`ddof=1`) em
+`outputs/part3_eixo2/summary_eixo2.json`.

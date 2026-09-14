@@ -38,7 +38,7 @@ from src.utils import colorize_instances
 
 MODEL_LABELS = {
     "unet_watershed": "U-Net ResNet-34",
-    "deeplab_aspp": "DeepLab/ASPP autoral",
+    "deeplab_aspp": "Cabeça DeepLab/ASPP autoral\n(inspirada no DeepLabv3)",
 }
 
 
@@ -185,11 +185,17 @@ def plot_degradation_curve(
                 continue
             degradation = fixed[scale]["summary"]["mAP_degradation_percent_vs_1x"]
             if degradation is not None:
+                if degradation > 0:
+                    variation_label = f"queda {degradation:.1f}%"
+                elif degradation < 0:
+                    variation_label = f"ganho {abs(degradation):.1f}%"
+                else:
+                    variation_label = "sem variação"
                 axes[0].annotate(
-                    f"{degradation:+.1f}%",
+                    variation_label,
                     (scale, value),
                     textcoords="offset points",
-                    xytext=(0, 8),
+                    xytext=(0, -18 if model_key == "deeplab_aspp" and scale == 2.0 else 8),
                     ha="center",
                     fontsize=8,
                     color=colors[model_key],

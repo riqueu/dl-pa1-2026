@@ -23,10 +23,11 @@ O edital estipula os seguintes requisitos mandatórios para a Parte 5:
    - Elaborar hipótese biológica, óptica ou arquitetural fundamentada para cada um dos 5 casos (ex.: contraste ambíguo, diâmetro que excede o raio de inundação do Watershed, aglomerados densos com erosão insuficiente).
 3. **Cálculo de Campo Receptivo vs. Distribuição de Tamanhos:**
    - Calcular a distribuição empírica de diâmetros e áreas de todos os núcleos do dataset DSB2018 (histograma de diâmetros equivalentes $d = 2\sqrt{A/\pi}$).
-   - Comparar com o campo receptivo teórico do encoder ResNet-34 ($899\text{ px}$ sem atrous e $931\text{ px}$ a $1507\text{ px}$ com ASPP).
+   - Redimensionar cada máscara para $256\times256$ antes de medir os objetos, mantendo diâmetros e campo receptivo na mesma escala.
+   - Comparar o encoder OS16 sem atrous ($739\text{ px}$) e com atrous ($931\text{ px}$), mantendo a mesma resolução de saída; os ramos ASPP alcançam teoricamente $1123$ a $1507\text{ px}$.
    - Explicar o que a relação entre campo receptivo e tamanho dos núcleos revela sobre as causas reais de erro do modelo.
 4. **Implementação de uma Correção (Antes vs. Depois):**
-   - Escolher uma falha diagnosticável e implementar uma correção no pipeline (ex.: calibração adaptativa dos limiares de interior/área mínima no Watershed ou equalização de contraste local).
+   - Escolher uma falha diagnosticável e implementar uma correção no pipeline. A execução final usou parâmetros fixos calibrados especificamente para o Caso 2.
    - Demonstrar quantitativamente e visualmente a recuperação do caso (Antes vs. Depois).
 
 ---
@@ -51,17 +52,20 @@ Para cada imagem selecionada, salvar em `outputs/part5_gallery/` um painel em al
 - Painel 4: Mapa Intermediário de Probabilidades (RGB: Vermelho = Fronteira, Verde = Interior, Azul = Fundo).
 
 ### 2.3. Levantamento Empírico do Tamanho dos Núcleos
-- Iterar sobre todas as máscaras individuais do DSB2018 (`stage1_train`) e calcular:
+- Iterar sobre todas as máscaras individuais do DSB2018 (`stage1_train`), redimensioná-las por vizinho mais próximo para $256\times256$ e calcular:
   $$\text{Área } A = \sum \text{pixels}, \quad \text{Diâmetro Equivalente } d = 2 \sqrt{\frac{A}{\pi}}$$
 - Gerar gráfico `outputs/part5_gallery/nuclei_size_distribution.png`:
   - Histograma com curva de densidade dos diâmetros celulares.
-  - Linhas verticais indicando a média ($\approx 25\text{ px}$), percentil 95 ($\approx 55\text{ px}$), máximo ($\approx 140\text{ px}$) e o Campo Receptivo Teórico ($RF = 899\text{ px}$).
-- **Discussão Conceitual:** Demonstrar que $RF_{\text{encoder}} \gg d_{\text{núcleo}}$, comprovando que as falhas não decorrem de falta de campo receptivo para enxergar o objeto inteiro, mas sim da **perda de resolução espacial subpixel na crista de fronteira de 1 pixel**.
+  - Linhas indicando média ($13{,}91$ px), percentil 95 ($32{,}31$ px) e máximo ($83{,}57$ px) na escala efetivamente recebida pela rede.
+  - Das 29.461 máscaras originais, 18 objetos minúsculos colapsam para área zero após o redimensionamento, evidenciando perda real de informação na entrada.
+  - Comparação OS16 sem e com atrous, evitando confundir mudança de dilatação com mudança de resolução de saída.
+- **Discussão Conceitual:** O campo receptivo teórico pode exceder $256$ px porque inclui posições preenchidas por padding. O contexto observável permanece limitado à entrada $256\times256$, e o campo receptivo efetivo aprendido tende a ser menor. Portanto, a relação com o diâmetro dos núcleos sustenta, mas não comprova isoladamente, a hipótese de que parte das falhas decorra de perda de detalhes finos de fronteira.
 
 ### 2.4. Implementação e Medição da Correção
-- **Correção Proposta:** *Calibração Adaptativa do Watershed (`src/postprocess.py`)*:
-  - Implementar ajuste dinâmico do limiar de interior $\tau_{\text{int}}$ e filtragem adaptativa de área mínima $\text{min\_area}$ orientada pela escala estimada da imagem.
+- **Correção executada:** *Correção morfológica calibrada para o Caso 2*:
+  - Usar os parâmetros fixos `interior_threshold=0.40`, `foreground_threshold=0.40`, `min_area=60` e `seed_closing_radius=4`.
   - Comparar o mAP e o erro de contagem no caso selecionado antes e depois da correção.
+  - Explicitar que erro de contagem zero não implica segmentação perfeita: o mAP após a correção permanece em $0{,}2518$.
   - Salvar painel visual `outputs/part5_gallery/correction_before_after.png`.
 
 ---

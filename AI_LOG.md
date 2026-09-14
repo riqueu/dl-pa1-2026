@@ -12,9 +12,9 @@ Uso de ferramentas de IA como suporte de pair programming, planejamento e divis�
 ---
 
 ### Episódio 2: Ablações de Resolução e Funções de Perda (Parte 3)
-- **Problema:** Comparar mecanismos de resolução (U-Net Skips vs. Gargalo Cego vs. DeepLabv3 ASPP) e sensibilidade a perdas (CE balanceada vs. Focal $\gamma \in \{0,1,2,5\}$) com 2 seeds cada.
-- **Aporte da IA:** Planejamento experimental em `docs/parte3.md`, automação dos scripts de grade (`run_eixo1.sh`, `run_eixo2.sh`) e ajuste das dilatações atrous com output stride 16 na ResNet34.
-- **Decisão da dupla:** Manter a U-Net com CE balanceada ($\gamma=0$) como arquitetura oficial, comprovando que o ASPP degrada em núcleos pequenos e $\gamma=5$ prejudica as cristas de fronteira.
+- **Problema:** Comparar mecanismos de resolução (U-Net Skips vs. Gargalo Cego vs. cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3) e sensibilidade a perdas (CE balanceada vs. Focal $\gamma \in \{0,1,2,5\}$) com 2 seeds cada.
+- **Aporte da IA:** Planejamento experimental em `docs/parte3.md`, automação dos runners de grade (`run_eixo1.sh`, `run_eixo2.py`) e ajuste das dilatações atrous com output stride 16 na ResNet34.
+- **Decisão da dupla:** Manter a U-Net com CE balanceada ($\gamma=0$) como arquitetura oficial. A tendência observada é compatível com maior fragilidade do ASPP em núcleos pequenos; o experimento não isola causalidade. A configuração $\gamma=5$ também apresentou piora nas cristas de fronteira.
 
 ---
 
@@ -27,12 +27,12 @@ Uso de ferramentas de IA como suporte de pair programming, planejamento e divis�
 
 ### Episódio 4: Galeria de Falhas e Correção Morfológica (Parte 5)
 - **Problema:** Mapear os 5 piores casos de falha do modelo oficial, confrontar o campo receptivo teórico ($RF$) com a morfologia celular e propor uma intervenção eficaz.
-- **Aporte da IA:** Estruturação do plano em `docs/parte5.md`, script de mineração de falhas e dedução matemática do $RF$ da ResNet34 ($899\text{ px}$ vs. diâmetro médio de $21{,}4\text{ px}$).
-- **Decisão da dupla:** Implementar fechamento morfológico de sementes (`seed_closing_radius=4`) no Watershed, zerando o erro de contagem no caso de células gigantes rugosas.
+- **Aporte da IA:** Estruturação do plano em `docs/parte5.md`, script de mineração de falhas e comparação do campo receptivo teórico com os diâmetros medidos após redimensionamento para $256\times256$.
+- **Decisão da dupla:** Implementar uma correção morfológica com parâmetros fixos calibrados para o Caso 2 (`seed_closing_radius=4`). O erro de contagem foi zerado nesse caso, mas o mAP final de $0{,}2518$ mostra que as máscaras permanecem imperfeitas.
 
 ---
 
 ### Episódio 5: Teste de Estresse de Escala e Análise Teórica (Parte 6)
-- **Problema:** Avaliar o comportamento de U-Net e DeepLabv3 ASPP sob sub-resolução ($0{,}5\times$) e sobre-resolução ($2{,}0\times$).
+- **Problema:** Avaliar o comportamento de U-Net e da cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3, sob sub-resolução ($0{,}5\times$) e sobre-resolução ($2{,}0\times$).
 - **Aporte da IA:** Estruturação do plano em `docs/parte6.md`, formalização teórica da não-invariância de escala em FCNs e automação do pipeline multiescala.
-- **Decisão da dupla:** Congelar limiares de inferência para avaliar a robustez crua da representação, demonstrando o colapso do ASPP em $0{,}5\times$ ($-88{,}9\%$) e a resiliência das skip connections da U-Net.
+- **Decisão da dupla:** Congelar limiares de inferência para avaliar a robustez crua da representação. A queda de $88{,}9\%$ do ASPP em $0{,}5\times$ é compatível com maior sensibilidade a núcleos subamostrados, enquanto a U-Net reteve mais desempenho; trata-se de interpretação dos resultados, não de prova causal isolada.

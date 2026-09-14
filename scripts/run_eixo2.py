@@ -10,7 +10,8 @@ Executa a grade completa de ablações com 2 seeds (42 e 123):
 Para cada configuração:
 1. Treina o modelo U-Net 3-canais por 15 épocas no DSB2018.
 2. Avalia no conjunto de validação com Hungarian matching.
-3. Coleta as métricas, calcula média ± desvio padrão e gera gráficos/tabelas consolidadas.
+3. Coleta as métricas, calcula média ± desvio-padrão amostral entre seeds e
+   gera gráficos/tabelas consolidadas.
 """
 
 from typing import Any, Dict, List
@@ -73,6 +74,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=str, default="all", help="Nome da config específica ou 'all'")
     parser.add_argument("--skip-existing", action="store_true", default=True, help="Pula treinos já concluídos")
     parser.add_argument("--force", action="store_true", help="Força re-execução de tudo")
+    parser.add_argument(
+        "--summarize-only",
+        action="store_true",
+        help="Apenas reconsolida as métricas existentes, sem treinar ou avaliar",
+    )
     return parser.parse_args()
 
 
@@ -119,8 +125,8 @@ def main() -> None:
             eval_json = os.path.join(eval_dir, "metrics_dsb2018_val_hungarian.json")
 
             # 1. Treinamento
-            needs_train = True
-            if os.path.exists(ckpt_path) and not args.force:
+            needs_train = not args.summarize_only
+            if needs_train and os.path.exists(ckpt_path) and not args.force:
                 print(f"[SKIP] Checkpoint já existente em {ckpt_path}")
                 needs_train = False
 
@@ -142,8 +148,8 @@ def main() -> None:
                 run_command(train_cmd, f"Treinando {cfg['label']} (Seed {seed})")
 
             # 2. Avaliação
-            needs_eval = True
-            if os.path.exists(eval_json) and not args.force and not needs_train:
+            needs_eval = not args.summarize_only
+            if needs_eval and os.path.exists(eval_json) and not args.force and not needs_train:
                 print(f"[SKIP] Avaliação já existente em {eval_json}")
                 needs_eval = False
 
@@ -160,6 +166,8 @@ def main() -> None:
                 run_command(eval_cmd, f"Avaliando {cfg['label']} (Seed {seed})")
 
             # 3. Ler Métricas
+            if not os.path.exists(eval_json):
+                raise FileNotFoundError(f"Métricas ausentes para consolidação: {eval_json}")
             with open(eval_json, "r", encoding="utf-8") as f:
                 metrics = json.load(f)
 
@@ -191,11 +199,14 @@ def main() -> None:
         ious = [v["iou"] for v in seed_data.values()]
         dices = [v["dice"] for v in seed_data.values()]
 
-        mean_map, std_map = float(np.mean(maps)), float(np.std(maps))
-        mean_ap50, std_ap50 = float(np.mean(ap50s)), float(np.std(ap50s))
-        mean_cnt, std_cnt = float(np.mean(count_errs)), float(np.std(count_errs))
-        mean_iou, std_iou = float(np.mean(ious)), float(np.std(ious))
-        mean_dice, std_dice = float(np.mean(dices)), float(np.std(dices))
+        def sample_std(values: List[float]) -> float:
+            return float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+
+        mean_map, std_map = float(np.mean(maps)), sample_std(maps)
+        mean_ap50, std_ap50 = float(np.mean(ap50s)), sample_std(ap50s)
+        mean_cnt, std_cnt = float(np.mean(count_errs)), sample_std(count_errs)
+        mean_iou, std_iou = float(np.mean(ious)), sample_std(ious)
+        mean_dice, std_dice = float(np.mean(dices)), sample_std(dices)
 
         data["summary"] = {
             "mAP_mean": mean_map,
@@ -203,13 +214,14 @@ def main() -> None:
             "AP50_mean": mean_ap50,
             "AP50_std": std_ap50,
             "AP75_mean": float(np.mean(ap75s)),
-            "AP75_std": float(np.std(ap75s)),
+            "AP75_std": sample_std(ap75s),
             "count_error_mean": mean_cnt,
             "count_error_std": std_cnt,
             "iou_mean": mean_iou,
             "iou_std": std_iou,
             "dice_mean": mean_dice,
             "dice_std": std_dice,
+            "std_definition": "desvio-padrão amostral entre seeds (ddof=1)",
         }
 
         row = f"{data['label']:<18} | {data['loss']:<16} | {data['gamma']:<4.1f} | {mean_map:.4f} ± {std_map:.4f}     | {mean_ap50:.4f}       | {mean_cnt:.2f} ± {std_cnt:.2f} núcleos"

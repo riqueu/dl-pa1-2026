@@ -393,11 +393,14 @@ def compute_receptive_field_trace(
 def resnet34_receptive_field_summary(
     output_stride: int = 32,
     aspp_rates: Sequence[int] = (6, 12, 18),
+    dilate_layer4: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Resume o campo receptivo do ResNet34 e dos ramos ASPP da Parte 3.
 
-    O caso ``output_stride=16`` espelha exatamente ``ResNetEncoder``: remove o
-    stride do ``layer4`` e aplica dilatação 2 às seis convoluções desse estágio.
+    Por padrão, ``output_stride=16`` espelha exatamente ``ResNetEncoder``:
+    remove o stride do ``layer4`` e aplica dilatação 2 às seis convoluções desse
+    estágio. ``dilate_layer4=False`` mantém a mesma resolução de saída (OS16),
+    mas sem atrous, e serve como contrafactual de campo receptivo na Parte 5.
     O ramo de pooling global é registrado como contexto da imagem inteira, sem
     atribuir a ele um tamanho finito independente da entrada.
     """
@@ -405,6 +408,10 @@ def resnet34_receptive_field_summary(
         raise ValueError("output_stride deve ser 16 ou 32.")
     if len(aspp_rates) != 3 or any(int(rate) <= 0 for rate in aspp_rates):
         raise ValueError("aspp_rates deve conter três inteiros positivos.")
+    if dilate_layer4 is None:
+        dilate_layer4 = output_stride == 16
+    if output_stride == 32 and dilate_layer4:
+        raise ValueError("dilate_layer4=True exige output_stride=16.")
 
     specs: List[Dict[str, Any]] = [
         {"name": "stem.conv1", "kernel": 7, "stride": 2},
@@ -417,7 +424,7 @@ def resnet34_receptive_field_summary(
             dilation = 1
             if stage == 4 and output_stride == 16:
                 stride = 1
-                dilation = 2
+                dilation = 2 if dilate_layer4 else 1
             specs.extend(
                 [
                     {
@@ -444,6 +451,7 @@ def resnet34_receptive_field_summary(
 
     return {
         "output_stride": output_stride,
+        "dilate_layer4": dilate_layer4,
         "encoder_receptive_field": encoder_rf,
         "encoder_jump": encoder_jump,
         "aspp_branch_receptive_fields": branch_rf,

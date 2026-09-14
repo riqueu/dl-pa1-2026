@@ -66,7 +66,7 @@
       "name": "Caso 5 — Limite de Densidade em Monocamada Confluente (369 Núcleos)",
       "modality": "Fluorescência Densa Multicelular",
       "diagnostic": "Em contato intercelular em 100% do perímetro, a erosão de 1 pixel extingue por completo o interior dos menores núcleos espremidos no centro do aglomerado (subcontagem residual de 47 células).",
-      "mAP": 0.3374349491595699,
+      "mAP": 0.3369410137451383,
       "ap50": 0.657074340527578,
       "ap75": 0.31368821292775667,
       "n_pred": 322,
@@ -75,31 +75,44 @@
     }
   ],
   "morphological_distribution": {
+    "analysis_resolution": [
+      256,
+      256
+    ],
+    "source_nuclei": 29461,
+    "collapsed_after_resize": 18,
     "total_nuclei": 29461,
     "total_images": 670,
-    "diameter_mean": 21.4,
-    "diameter_std": 11.95,
-    "diameter_median": 19.71,
-    "diameter_p25": 12.26,
-    "diameter_p75": 27.03,
-    "diameter_p95": 48.43,
-    "diameter_max": 118.54,
-    "diameter_min": 5.17
+    "diameter_mean": 13.91,
+    "diameter_std": 8.4,
+    "diameter_median": 11.99,
+    "diameter_p25": 9.1,
+    "diameter_p75": 16.77,
+    "diameter_p95": 32.31,
+    "diameter_max": 83.57,
+    "diameter_min": 0.0
   },
   "receptive_field": {
-    "encoder_resnet34_os32": 899,
+    "comparison_output_stride": 16,
+    "encoder_without_atrous_os16": 739,
+    "encoder_with_atrous_os16": 931,
     "aspp_branch_os16": {
       "conv_1x1": 931,
       "conv_3x3_rate_6": 1123,
       "conv_3x3_rate_12": 1315,
       "conv_3x3_rate_18": 1507
     },
-    "ratio_rf_vs_mean_diameter": 42.0,
-    "ratio_rf_vs_max_diameter": 7.6
+    "theoretical_rf_note": "RF teórico; pode incluir padding além da entrada 256x256.",
+    "available_context_note": "O contexto observável é limitado aos 256x256 pixels da entrada.",
+    "effective_rf_note": "O campo receptivo efetivo aprendido tende a ser menor e não foi estimado empiricamente.",
+    "ratio_atrous_rf_vs_mean_diameter": 66.9,
+    "ratio_atrous_rf_vs_max_diameter": 11.1
   },
   "correction_experiment": {
     "case_evaluated": "Caso 2 (idx=56, ebc18868864ad075)",
-    "technique": "Watershed Adaptativo com Consolidação Morfológica de Sementes (seed_closing_radius=4, min_area=60, interior_threshold=0.40)",
+    "technique": "Correção morfológica calibrada para o Caso 2 (seed_closing_radius=4, min_area=60, interior_threshold=0.40)",
+    "scope_note": "Parâmetros fixos calibrados para este caso; não constituem adaptação automática por imagem.",
+    "interpretation_note": "Erro de contagem zero não implica segmentação perfeita; o mAP após a correção permanece abaixo de 1.",
     "before": {
       "mAP": 0.07403048660135832,
       "ap50": 0.125,

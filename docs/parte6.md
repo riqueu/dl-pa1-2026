@@ -7,11 +7,11 @@ Este documento estabelece o plano técnico, os contratos de código, o protocolo
 **Dataset:** Data Science Bowl 2018 (DSB2018) — Split de validação (67 imagens)  
 **Modelos Avaliados:** 
 1. U-Net ResNet-34 + Watershed (`checkpoints/part2_watershed.pth`)
-2. DeepLab/ASPP autoral com ResNet-34 (`checkpoints/part3_eixo1/deeplab_aspp_seed42.pth`)
+2. Cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3, com ResNet-34 (`checkpoints/part3_eixo1/deeplab_aspp_seed42.pth`)
 
 Neste protocolo, **1,0x significa a resolucao de referencia usada no treino
 (256x256)**, e nao a resolucao original variavel dos arquivos do DSB2018. A
-variante ASPP e inspirada no DeepLabv3: ela nao deve ser chamada de DeepLabv3+,
+variante ASPP é inspirada no DeepLabv3: ela não deve ser chamada de DeepLabv3+,
 pois nao possui o decoder com features rasas caracteristico dessa arquitetura.
 
 ---
@@ -24,7 +24,7 @@ O edital estipula os seguintes requisitos para a Parte 6 (Opção 3):
    - Quantificar o impacto nas métricas oficiais de instância: mAP@[.50:.95], AP50, AP75 e Erro Absoluto de Contagem. O valor em 1,0x e incluido como referencia para calcular a queda.
    - Gerar a curva de degradação do mAP em função do fator de escala.
 2. **Comparação de Arquiteturas:**
-   - Contrastar a resiliência da arquitetura U-Net (com skip connections multinível) contra a arquitetura DeepLabv3 (com módulo ASPP — *Atrous Spatial Pyramid Pooling*).
+   - Contrastar a resiliência da arquitetura U-Net (com skip connections multinível) contra a cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3.
 3. **Fundamentação Teórica Formal:**
    - Responder rigorosamente: **Por que uma rede totalmente convolucional (FCN) não é invariante a escala?**
    - Responder rigorosamente: **O que o ASPP faz (ou não faz) a respeito?**
@@ -56,7 +56,7 @@ sensibilidade arquitetural do efeito de um hiperparametro expresso em pixels.
   - Eixo Y: mAP@[.50:.95] e AP50.
 - Duas curvas sobrepostas em cada painel (mAP e AP50):
   - Curva azul: U-Net ResNet-34 (Baseline Parte 2).
-  - Curva laranja: DeepLabv3 ASPP (Parte 3 Eixo 1).
+  - Curva laranja: cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3 (Parte 3 Eixo 1).
 - Visualização clara da taxa percentual de queda e da retencao
   $\operatorname{mAP}(s)/\operatorname{mAP}(1)$, evitando confundir robustez
   relativa com a grande diferenca de desempenho absoluto entre os modelos.
@@ -65,7 +65,7 @@ sensibilidade arquitetural do efeito de um hiperparametro expresso em pixels.
 - Grade visual ilustrando um caso desafiador do conjunto de validação sob as três escalas:
   - Linha 1: Imagem de entrada redimensionada ($0{,}5\times$, $1{,}0\times$, $2{,}0\times$).
   - Linha 2: Predição de instâncias pela U-Net Watershed.
-  - Linha 3: Predição de instâncias pelo DeepLabv3 ASPP.
+  - Linha 3: Predição pela cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3.
   - Linha 4: Ground Truth de referência.
 
 ---
@@ -104,7 +104,7 @@ Ao término da implementação do Membro B, a branch `feature/part6-scale-stress
 1. `scripts/run_scale_stress.py`: Script autônomo de estresse de escala.
 2. `outputs/part6_stress/`:
    - `scale_metrics.json` (tabela quantitativa completa com mAP, AP50, AP75 e erro de contagem para $0{,}5\times$, $1{,}0\times$ e $2{,}0\times$).
-   - `scale_degradation_curve.png` (curva de degradação comparativa U-Net vs. DeepLabv3 ASPP).
+   - `scale_degradation_curve.png` (comparação U-Net vs. cabeça DeepLab/ASPP autoral, inspirada no DeepLabv3).
    - `scale_visual_comparison.png` (painel visual comparativo).
 3. Resposta teórica incorporada à apresentação e documentada no `AI_LOG.md` e `inferencia.ipynb`.
 
@@ -130,5 +130,7 @@ python scripts/run_scale_stress.py \
 ```
 
 Os resultados finais dependem dos dois checkpoints e de
-`data/raw/stage1_train/`, que nao sao versionados neste checkout. Depois da
-execucao real, as tabelas e figuras serao incorporadas ao notebook central.
+`data/raw/stage1_train/`, que não são versionados. O checkpoint ASPP precisa ser
+o mesmo usado na execução consolidada; no estado atual ele deve ser recuperado
+da máquina que executou o experimento ou publicado como asset da Release. Não é
+correto substituí-lo por outro treinamento da mesma configuração.
