@@ -24,14 +24,20 @@ Temos exatamente **3 modelos pré-treinados**, um para cada fase inicial do trab
 
 A Parte 6 também depende do checkpoint experimental
 `checkpoints/part3_eixo1/deeplab_aspp_seed42.pth`, produzido pela configuração
-`deeplab_aspp`, seed 42, do Eixo 1. Esse peso não está neste checkout nem entre
-os três assets atuais da Release v1.0.0. Para reproduzir os resultados finais,
-é necessário recuperar exatamente o arquivo da máquina que executou o teste ou
-publicá-lo como asset adicional; pesos de outra execução não são equivalentes.
+`deeplab_aspp`, seed 42, do Eixo 1. O peso não é versionado no Git, mas está
+disponível na Release v1.0.0:
+
+- [Download `deeplab_aspp_seed42.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/deeplab_aspp_seed42.pth)
+- SHA-256: `17ea1bf81309fc42b4183ff4c5d0323284efa6dbecc16abe648a90b8b4b3d201`
+
+Esse hash identifica exatamente o checkpoint usado nos resultados da Parte 6;
+pesos de outra execução não são equivalentes.
 
 ## Download via Linha de Comando
 
 Para baixar o modelo oficial diretamente para esta pasta via terminal:
 ```bash
 wget -P checkpoints/ https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part2_watershed.pth
+mkdir -p checkpoints/part3_eixo1
+wget -P checkpoints/part3_eixo1/ https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/deeplab_aspp_seed42.pth
 ```

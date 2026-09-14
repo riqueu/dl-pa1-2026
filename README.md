@@ -95,10 +95,11 @@ python3 scripts/run_scale_stress.py --unet-checkpoint checkpoints/part2_watershe
 ```
 
 O checkpoint ASPP da Parte 6 é produzido pelo Eixo 1, na configuração
-`deeplab_aspp` com seed 42. Ele não está versionado e ainda não consta na
-Release v1.0.0. Para reproduzir a Parte 6, recupere exatamente o arquivo da
-máquina que executou o experimento ou publique-o como asset da Release; não o
-substitua por pesos de outra execução, mesmo que tenham a mesma arquitetura.
+`deeplab_aspp` com seed 42. Ele não é versionado no Git e está disponível como
+asset da [Release v1.0.0](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/deeplab_aspp_seed42.pth).
+O SHA-256 do arquivo usado nos resultados é
+`17ea1bf81309fc42b4183ff4c5d0323284efa6dbecc16abe648a90b8b4b3d201`;
+pesos de outra execução não são equivalentes, mesmo com a mesma arquitetura.
 
 ---
 
@@ -109,10 +110,13 @@ substitua por pesos de outra execução, mesmo que tenham a mesma arquitetura.
   - [Download `part2_watershed.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part2_watershed.pth): Modelo final oficial ($mAP = 0.5157$).
   - [Download `part1_baseline.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part1_baseline.pth): Baseline semântico binário ($mAP = 0.4820$).
   - [Download `part0_synthetic.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part0_synthetic.pth): Teste de sanidade sintético ($IoU > 0.99$).
+  - [Download `deeplab_aspp_seed42.pth`](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/deeplab_aspp_seed42.pth): ablação `deeplab_aspp`, seed 42, usada na Parte 6.
 
 Download rápido via terminal:
 ```bash
 wget -P checkpoints/ https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/part2_watershed.pth
+mkdir -p checkpoints/part3_eixo1
+wget -P checkpoints/part3_eixo1/ https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/deeplab_aspp_seed42.pth
 ```
 
 ---

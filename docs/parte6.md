@@ -130,7 +130,8 @@ python scripts/run_scale_stress.py \
 ```
 
 Os resultados finais dependem dos dois checkpoints e de
-`data/raw/stage1_train/`, que não são versionados. O checkpoint ASPP precisa ser
-o mesmo usado na execução consolidada; no estado atual ele deve ser recuperado
-da máquina que executou o experimento ou publicado como asset da Release. Não é
-correto substituí-lo por outro treinamento da mesma configuração.
+`data/raw/stage1_train/`, que não são versionados. O checkpoint ASPP usado na
+execução consolidada está disponível na [Release v1.0.0](https://github.com/riqueu/dl-pa1-2026/releases/download/v1.0.0/deeplab_aspp_seed42.pth),
+com SHA-256
+`17ea1bf81309fc42b4183ff4c5d0323284efa6dbecc16abe648a90b8b4b3d201`.
+Não é correto substituí-lo por outro treinamento da mesma configuração.
