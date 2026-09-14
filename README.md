@@ -41,14 +41,20 @@ pip install -r requirements.txt
 
 ## 3. Dados (DSB2018 / BBBC038v1)
 
-1. Baixe o `stage1_train.zip` (82.9 MB) e `metadata.xlsx` do [Broad Institute](https://bbbc.broadinstitute.org/BBBC038).
+1. Baixe o `stage1_train.zip` (82.9 MB) e, para conferir a taxonomia dos grupos,
+   o `metadata.xlsx` do [Broad Institute](https://bbbc.broadinstitute.org/BBBC038).
 2. Extraia os dados mantendo a estrutura:
 ```bash
 mkdir -p data/raw/stage1_train
 unzip stage1_train.zip -d data/raw/stage1_train
 mv metadata.xlsx data/raw/ && rm stage1_train.zip
 ```
-*Os splits estratificados por modalidade estão salvos em `data/splits.json`.*
+*Os splits estratificados por modalidade estão salvos em `data/splits.json` e
+devem ser reutilizados para reproduzir as métricas publicadas. O
+`metadata.xlsx` possui 43 registros agregados por projeto e não contém uma chave
+`ImageId`; por isso, ele valida a taxonomia, enquanto cada imagem é classificada
+por uma heurística visual determinística em `Default`, `Color_Histology`
+(agregação de `Purple`/`PinkAndPurple`) ou `TissueBW`.*
 
 ---
 

@@ -37,7 +37,7 @@ def evaluate_instances(pred_mask: np.ndarray, gt_mask: np.ndarray, iou_threshold
 2. **Matching & mAP (Partes 0 e 1):** Criar em `src/metrics.py` o algoritmo de matching do zero (Hungarian via `scipy.optimize.linear_sum_assignment` ou Greedy por IoU decrescente) varrendo IoU de 0.50 a 0.95 com passo 0.05, calculando TP, FP, FN, mAP e $\vert{}N_{pred} - N_{gt}\vert{}$ (erro de contagem).
 
 
-3. **DSB2018 & Split Estratificado (Parte 1):** Criar o parser do `data/raw/stage1_train/` e a função de split estratificado por `image_group` do `metadata.xlsx`, salvando os splits em `data/splits.json`.
+3. **DSB2018 & Split Estratificado (Parte 1):** Criar o parser do `data/raw/stage1_train/` e salvar os splits em `data/splits.json`. Como o `metadata.xlsx` oficial só informa `image_group` por projeto e não contém `ImageId`, usar sua taxonomia como referência e atribuir a modalidade de cada imagem por heurística visual determinística.
 
 
 

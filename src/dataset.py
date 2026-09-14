@@ -6,7 +6,8 @@ Este módulo implementa:
 2. DSB2018Dataset: Leitor e pré-processador da base real Data Science Bowl 2018
    (BBBC038v1) com fusão das máscaras individuais de instâncias.
 3. Funções de particionamento estratificado (create_stratified_splits e load_splits)
-   baseadas na modalidade de microscopia informada em metadata.xlsx.
+   baseadas em uma heurística visual determinística de modalidade. A taxonomia é
+   conferida contra metadata.xlsx, cuja granularidade é por projeto, não por imagem.
 
 Todos os datasets respeitam estritamente os contratos de interface:
 - image: Tensor float32 (3, H, W) normalizado em [0.0, 1.0].
@@ -423,6 +424,33 @@ def compute_three_class_weights(
 
 # Estratificação e Criação de Splits (Parte 1)
 
+def _read_metadata_image_groups(metadata_path: str) -> List[str]:
+    """Lê e valida a taxonomia agregada de grupos do metadata oficial.
+
+    O arquivo BBBC038 possui uma linha por projeto na ``Suppl. Table S1`` e não
+    contém ``ImageId``. Portanto, ele documenta os grupos disponíveis, mas não
+    permite associar diretamente cada uma das 670 imagens a um grupo.
+    """
+    table = pd.read_excel(metadata_path, sheet_name="Suppl. Table S1")
+    required_columns = {"image_set", "image_group"}
+    missing = required_columns.difference(table.columns)
+    if missing:
+        missing_text = ", ".join(sorted(missing))
+        raise ValueError(
+            f"metadata.xlsx inválido: coluna(s) ausente(s) em Suppl. Table S1: {missing_text}."
+        )
+
+    training_groups = table.loc[
+        table["image_set"].astype(str).str.lower() == "training", "image_group"
+    ].dropna()
+    groups = sorted({str(value).strip() for value in training_groups if str(value).strip()})
+    if not groups:
+        raise ValueError(
+            "metadata.xlsx inválido: nenhum image_group de treinamento foi encontrado."
+        )
+    return groups
+
+
 def identify_image_modality(
     image_path: str,
 ) -> str:
@@ -473,7 +501,9 @@ def create_stratified_splits(
 
     Args:
         data_dir: Diretório raiz de stage1_train.
-        metadata_path: Caminho para metadata.xlsx (opcional).
+        metadata_path: Caminho opcional para o metadata oficial. Quando presente,
+            sua taxonomia agregada é validada, mas não usada como associação por
+            imagem porque o arquivo não contém a coluna ImageId.
         splits_path: Caminho onde o arquivo JSON com os splits será salvo.
         train_ratio: Proporção de treino (padrão 0.80).
         val_ratio: Proporção de validação (padrão 0.10).
@@ -494,7 +524,14 @@ def create_stratified_splits(
     if len(image_ids) == 0:
         raise ValueError(f"Nenhuma imagem encontrada em {data_dir}.")
 
-    # Mapear cada imagem para sua modalidade
+    # O metadata oficial descreve grupos por projeto, sem uma chave ImageId. Sua
+    # leitura valida a fonte/taxonomia; os rótulos individuais abaixo são obtidos
+    # por uma heurística visual determinística e reprodutível.
+    if metadata_path and os.path.isfile(metadata_path):
+        _read_metadata_image_groups(metadata_path)
+
+    # Mapear cada imagem para um de três estratos visuais. Purple e
+    # PinkAndPurple são agregados em Color_Histology.
     labels: List[str] = []
     for i_id in image_ids:
         img_file = os.path.join(data_dir, i_id, "images", f"{i_id}.png")
